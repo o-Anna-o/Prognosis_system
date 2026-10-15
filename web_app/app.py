@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Веб-приложение прогнозирования стоимости квартир Москвы.
-
+"""
 Запуск:  .venv\\Scripts\\python.exe web_app\\app.py
 """
 
@@ -18,9 +17,13 @@ log = logging.getLogger("prognosis")
 
 app = Flask(__name__)
 
-# ---------------------------------------------------------------------------
+# Режим разработки: перечитывать шаблоны при каждом запросе и не кэшировать
+# статику (style.css/script.js), чтобы правки сразу отображались на сайте.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+
 # Обучение модели при старте (в фоновом потоке, чтобы сервер поднялся сразу)
-# ---------------------------------------------------------------------------
+
 MODEL: m.PrognosisModel | None = None
 MODEL_READY = False
 MODEL_ERROR: str | None = None
@@ -44,9 +47,9 @@ def _train_in_background() -> None:
 threading.Thread(target=_train_in_background, daemon=True).start()
 
 
-# ---------------------------------------------------------------------------
+
 # Валидация входных данных
-# ---------------------------------------------------------------------------
+
 def _parse_float(value, field_name: str, minimum: float | None = None) -> float:
     try:
         val = float(str(value).replace(",", ".").strip())
@@ -104,9 +107,9 @@ def _validate_payload(data: dict) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
+
 # Маршруты
-# ---------------------------------------------------------------------------
+
 @app.route("/")
 def index():
     """Главная страница с формой."""

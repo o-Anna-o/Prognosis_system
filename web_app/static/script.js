@@ -1,7 +1,3 @@
-/* ============================================================
-   Логика формы прогнозирования стоимости квартир
-   ============================================================ */
-
 "use strict";
 
 const form = document.getElementById("forecast-form");
@@ -14,13 +10,11 @@ const statusText = document.getElementById("status-text");
 
 let chart = null;
 
-/* ---------- Статус модели ---------- */
 async function checkStatus() {
     try {
         const res = await fetch("/api/status");
         const data = await res.json();
         if (data.ready) {
-            // При успешной загрузке модели точка статуса не отображается
             statusDot.classList.add("hidden");
             statusText.textContent = "Модель HistGradientBoosting";
         } else if (data.error) {
@@ -39,7 +33,6 @@ async function checkStatus() {
     }
 }
 
-/* ---------- Справочные данные ---------- */
 async function loadReference() {
     const res = await fetch("/api/reference");
     if (!res.ok) {
@@ -79,7 +72,7 @@ async function loadReference() {
     });
 }
 
-/* ---------- Валидация ---------- */
+// Валидация 
 function setError(fieldName, message) {
     const field = document.getElementById(fieldName);
     const msg = document.querySelector(`.error-msg[data-for="${fieldName}"]`);
@@ -155,7 +148,7 @@ function validateForm() {
     return valid;
 }
 
-/* ---------- Отправка прогноза ---------- */
+// Отправка прогноза 
 async function submitForecast(event) {
     event.preventDefault();
     clearErrors();
@@ -199,7 +192,7 @@ async function submitForecast(event) {
     }
 }
 
-/* ---------- Отрисовка результата ---------- */
+// Отрисовка результата 
 function renderResult(data) {
     const apt = data.apartment;
 
@@ -303,7 +296,7 @@ function showError(message) {
     errorSection.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-/* ---------- Вкладки ---------- */
+// Вкладки 
 document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
         const tab = btn.dataset.tab;
@@ -316,7 +309,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     });
 });
 
-/* ---------- EDA-графики (вкладка «Закономерности цен») ---------- */
+// EDA-графики Закономерности цен
 async function loadEda() {
     const imgs = {
         wall_material: document.getElementById("eda-wall-chart"),
@@ -342,7 +335,7 @@ async function loadEda() {
     }
 }
 
-/* ---------- Инициализация ---------- */
+// Инициализация 
 form.addEventListener("submit", submitForecast);
 form.addEventListener("reset", () => {
     clearErrors();
