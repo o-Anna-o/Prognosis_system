@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Прогнозирование стоимости квартиры Москвы</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a4fa0'/%3E%3Ctext x='32' y='45' font-size='38' text-anchor='middle' fill='white' font-family='Arial,sans-serif' font-weight='bold'%3EП%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <header class="site-header">
+        <div class="container header-inner">
+            <div class="logo">
+                <div>
+                    <h1>Прогнозирование стоимости квартиры в Москве</h1>
+                </div>
+            </div>
+            <div id="model-status" class="model-status">
+                <span class="status-dot"></span>
+                <span id="status-text">Проверка модели…</span>
+            </div>
+        </div>
+    </header>
+
+    <nav class="tabs container" aria-label="Разделы сайта">
+        <button type="button" class="tab-btn active" data-tab="forecast">Прогноз</button>
+        <button type="button" class="tab-btn" data-tab="eda">Закономерности цен</button>
+    </nav>
+
+    <main class="container">
+        <!-- ================= Вкладка «Прогноз» ================= -->
+        <section id="tab-forecast" class="tab-panel active">
+            <section class="card form-card">
+                <h2 class="card-title">Параметры квартиры</h2>
+                <form id="forecast-form" novalidate>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="region">Административный округ *</label>
+                            <select id="region" name="region" required>
+                                <option value=""> выберите округ </option>
+                            </select>
+                            <span class="error-msg" data-for="region"></span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="district">Район *</label>
+                            <input type="text" id="district" name="district" list="district-list"
+                                   placeholder="Введите район" required autocomplete="off">
+                            <datalist id="district-list"></datalist>
+                            <span class="error-msg" data-for="district"></span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="street">Улица *</label>
+                            <input type="text" id="street" name="street" list="street-list"
+                                   placeholder="Введите улицу" required autocomplete="off">
+                            <datalist id="street-list"></datalist>
+                            <span class="error-msg" data-for="street"></span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="wall_material">Материал стен *</label>
+                            <select id="wall_material" name="wall_material" required>
+                                <option value=""> выберите материал </option>
+                            </select>
+                            <span class="error-msg" data-for="wall_material"></span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="area">Площадь, м² *</label>
+                            <input type="text" id="area" name="area" inputmode="decimal"
+                                   placeholder="Введите площадь" required>
+                            <span class="error-msg" data-for="area"></span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="year_build">Год постройки *</label>
+                            <input type="text" id="year_build" name="year_build" inputmode="numeric"
+                                   placeholder="Введите год" required>
+                            <span class="error-msg" data-for="year_build"></span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="floor">Этаж *</label>
+                            <input type="text" id="floor" name="floor" inputmode="numeric"
+                                   placeholder="Введите этаж" required>
+                            <span class="error-msg" data-for="floor"></span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="n_years">Горизонт прогноза, лет</label>
+                            <input type="text" id="n_years" name="n_years" inputmode="numeric"
+                                   placeholder="Введите число лет" value="5">
+                            <span class="error-msg" data-for="n_years"></span>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" id="submit-btn" class="btn btn-primary">
+                            Рассчитать прогноз
+                        </button>
+                        <button type="reset" id="reset-btn" class="btn btn-secondary">Сбросить</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="result-section" class="card result-card hidden">
+                <h2 class="card-title">Результат прогноза</h2>
+
+                <div id="result-summary" class="result-summary"></div>
+
+                <div class="result-block">
+                    <h3>Прогноз цены по годам</h3>
+                    <div class="table-wrap">
+                        <table id="forecast-table" class="forecast-table">
+                            <thead>
+                                <tr>
+                                    <th>Год</th>
+                                    <th>Прогноз цены, руб.</th>
+                                    <th>Инфляция, %</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="result-block">
+                    <h3>Динамика цены</h3>
+                    <div class="chart-wrap">
+                        <canvas id="forecast-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section id="error-section" class="card error-card hidden">
+                <p id="error-text"></p>
+            </section>
+        </section>
+
+        <!-- ================= Вкладка «Закономерности цен» ================= -->
+        <section id="tab-eda" class="tab-panel">
+            <div class="card">
+                <h2 class="card-title">Закономерности цен на квартиры</h2>
+                <p class="eda-intro">
+                    Анализ сделок с квартирами в Москве (2023–2026 гг.): как цена зависит
+                    от материала стен, района, площади и этажа.
+                </p>
+
+                <div class="eda-block">
+                    <h3>Цена квартиры по материалу стен</h3>
+                    <div class="eda-chart-wrap">
+                        <img id="eda-wall-chart" class="eda-chart" alt="Цена квартир по материалу стен">
+                    </div>
+                </div>
+
+                <div class="eda-block">
+                    <h3>Медианная цена квартиры по районам (топ-20)</h3>
+                    <div class="eda-chart-wrap">
+                        <img id="eda-district-chart" class="eda-chart" alt="Медианная цена квартиры по районам">
+                    </div>
+                </div>
+
+                <div class="eda-block">
+                    <h3>Цена квартиры в зависимости от площади (группы по 10 м²)</h3>
+                    <div class="eda-chart-wrap">
+                        <img id="eda-area-chart" class="eda-chart" alt="Цена квартиры в зависимости от площади">
+                    </div>
+                </div>
+
+                <div class="eda-block">
+                    <h3>Медианная цена квартиры по группе этажности</h3>
+                    <div class="eda-chart-wrap">
+                        <img id="eda-floor-chart" class="eda-chart" alt="Медианная цена квартиры по группе этажности">
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>подготовила Агапова А.Д. 2026 г</p>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
