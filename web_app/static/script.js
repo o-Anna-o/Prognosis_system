@@ -9,6 +9,17 @@ const statusDot = document.querySelector(".status-dot");
 const statusText = document.getElementById("status-text");
 
 let chart = null;
+let referenceData = null;
+
+// Регистрация плагина подписей данных (если CDN-скрипт плагина загрузился)
+if (window.ChartDataLabels) {
+    Chart.register(ChartDataLabels);
+}
+
+// Экспоненциальная задержка повторов, чтобы не забивать сервер запросами, пока модель обучается.
+function retryDelay(attempt) {
+    return Math.min(3000 * Math.pow(1.5, attempt), 30000);
+}
 
 async function checkStatus() {
     try {
@@ -27,40 +38,34 @@ async function checkStatus() {
             setTimeout(checkStatus, 3000);
         }
     } catch (err) {
+        // Сервер недоступен — продолжаем опрашивать, чтобы страница сама восстановилась, когда сервер снова поднимется.
         statusDot.className = "status-dot error";
-        statusText.textContent = "Сервер недоступен";
+        statusText.textContent = "Сервер недоступен. Переподключение…";
         console.error(err);
+        setTimeout(checkStatus, 3000);
     }
 }
 
-async function loadReference() {
-    const res = await fetch("/api/reference");
+async function loadReference(attempt = 0) {
+    let res;
+    try {
+        res = await fetch("/api/reference");
+    } catch (err) {
+        setTimeout(() => loadReference(attempt + 1), retryDelay(attempt));
+        return;
+    }
     if (!res.ok) {
-        setTimeout(loadReference, 3000);
+        setTimeout(() => loadReference(attempt + 1), retryDelay(attempt));
         return;
     }
     const data = await res.json();
+    referenceData = data;
 
-    const regionSelect = document.getElementById("region");
     data.regions.forEach((r) => {
         const opt = document.createElement("option");
         opt.value = r;
         opt.textContent = r;
         regionSelect.appendChild(opt);
-    });
-
-    const districtList = document.getElementById("district-list");
-    data.districts.forEach((d) => {
-        const opt = document.createElement("option");
-        opt.value = d;
-        districtList.appendChild(opt);
-    });
-
-    const streetList = document.getElementById("street-list");
-    data.streets.forEach((s) => {
-        const opt = document.createElement("option");
-        opt.value = s;
-        streetList.appendChild(opt);
     });
 
     const wallSelect = document.getElementById("wall_material");
@@ -71,6 +76,53 @@ async function loadReference() {
         wallSelect.appendChild(opt);
     });
 }
+
+// Каскадная фильтрация: округ → район → улица
+const regionSelect = document.getElementById("region");
+const districtInput = document.getElementById("district");
+const streetInput = document.getElementById("street");
+const districtList = document.getElementById("district-list");
+const streetList = document.getElementById("street-list");
+
+function fillDistrictList(region) {
+    districtList.innerHTML = "";
+    if (!region || !referenceData) return;
+    const districts = (referenceData.region_districts || {})[region] || [];
+    districts.forEach((d) => {
+        const opt = document.createElement("option");
+        opt.value = d;
+        districtList.appendChild(opt);
+    });
+}
+
+function fillStreetList(district) {
+    streetList.innerHTML = "";
+    if (!district || !referenceData) return;
+    const streets = (referenceData.district_streets || {})[district] || [];
+    streets.forEach((s) => {
+        const opt = document.createElement("option");
+        opt.value = s;
+        streetList.appendChild(opt);
+    });
+}
+
+regionSelect.addEventListener("change", () => {
+    districtInput.value = "";
+    streetInput.value = "";
+    lastDistrict = "";
+    fillDistrictList(regionSelect.value);
+    fillStreetList("");
+});
+
+let lastDistrict = "";
+districtInput.addEventListener("input", () => {
+    const district = districtInput.value.trim();
+    if (district !== lastDistrict) {
+        lastDistrict = district;
+        streetInput.value = "";
+        fillStreetList(district);
+    }
+});
 
 // Валидация 
 function setError(fieldName, message) {
@@ -263,11 +315,30 @@ function renderChart(forecast) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            layout: {
+                padding: { top: 30 },
+            },
+            interaction: {
+                mode: "nearest",
+                intersect: false,
+            },
             plugins: {
                 legend: { labels: { color: "#0f172a", font: { size: 13 } } },
                 tooltip: {
                     callbacks: {
                         label: (item) => ` ${item.parsed.y.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} млн руб.`,
+                    },
+                },
+                datalabels: {
+                    color: "#1a4fa0",
+                    anchor: "end",
+                    align: "top",
+                    offset: 6,
+                    font: { size: 12, weight: "bold" },
+                    formatter: (value) => value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                    hover: {
+                        color: "#0f172a",
+                        font: { size: 18, weight: "bold" }, 
                     },
                 },
             },
@@ -310,29 +381,31 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 });
 
 // EDA-графики Закономерности цен
-async function loadEda() {
+async function loadEda(attempt = 0) {
     const imgs = {
         wall_material: document.getElementById("eda-wall-chart"),
         districts: document.getElementById("eda-district-chart"),
         area: document.getElementById("eda-area-chart"),
         floor: document.getElementById("eda-floor-chart"),
     };
+    let res;
     try {
-        const res = await fetch("/api/eda");
-        if (!res.ok) {
-            setTimeout(loadEda, 3000);
-            return;
-        }
-        const data = await res.json();
-        Object.entries(imgs).forEach(([key, img]) => {
-            if (data[key]) {
-                img.src = data[key];
-            }
-        });
+        res = await fetch("/api/eda");
     } catch (err) {
         console.error("Ошибка загрузки EDA-графиков:", err);
-        setTimeout(loadEda, 5000);
+        setTimeout(() => loadEda(attempt + 1), retryDelay(attempt));
+        return;
     }
+    if (!res.ok) {
+        setTimeout(() => loadEda(attempt + 1), retryDelay(attempt));
+        return;
+    }
+    const data = await res.json();
+    Object.entries(imgs).forEach(([key, img]) => {
+        if (data[key]) {
+            img.src = data[key];
+        }
+    });
 }
 
 // Инициализация 
@@ -341,6 +414,9 @@ form.addEventListener("reset", () => {
     clearErrors();
     resultSection.classList.add("hidden");
     errorSection.classList.add("hidden");
+    lastDistrict = "";
+    fillDistrictList("");
+    fillStreetList("");
 });
 
 // Очистка ошибки поля при вводе

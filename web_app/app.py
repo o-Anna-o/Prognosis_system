@@ -1,7 +1,5 @@
-# -*- coding: utf-8 -*-
-"""
-Запуск:  .venv\\Scripts\\python.exe web_app\\app.py
-"""
+# Запуск:  .venv\Scripts\python.exe web_app\app.py
+# или:     start_server.bat
 
 from __future__ import annotations
 
@@ -17,35 +15,47 @@ log = logging.getLogger("prognosis")
 
 app = Flask(__name__)
 
-# Режим разработки: перечитывать шаблоны при каждом запросе и не кэшировать
-# статику (style.css/script.js), чтобы правки сразу отображались на сайте.
+# Перечитывать шаблоны при каждом запросе и не кэшировать
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
-# Обучение модели при старте (в фоновом потоке, чтобы сервер поднялся сразу)
+# Обучение модели при старте в фоновом потоке
 
 MODEL: m.PrognosisModel | None = None
 MODEL_READY = False
 MODEL_ERROR: str | None = None
 REFERENCE: dict | None = None
+EDA_CHARTS: dict | None = None
+_state_lock = threading.Lock()  # модель обучается в фоне
 
 
 def _train_in_background() -> None:
-    global MODEL, MODEL_READY, MODEL_ERROR, REFERENCE
+    global MODEL, MODEL_READY, MODEL_ERROR, REFERENCE, EDA_CHARTS
     try:
         log.info("Начало обучения модели...")
-        MODEL = m.train_model()
-        REFERENCE = m.load_reference_data()
-        MODEL_READY = True
-        log.info("Модель обучена: %d строк, базовый год %d",
-                 len(MODEL.model_df), MODEL.base_year)
+        model = m.train_model_cached() # если данные не менялись, модель загружается мгновенно
+        reference = m.load_reference_data()
+        with _state_lock:
+            MODEL, REFERENCE, MODEL_READY = model, reference, True
+        log.info("Модель готова: %d строк, базовый год %d",
+                 len(model.model_df), model.base_year)
     except Exception as exc:  # noqa: BLE001
-        MODEL_ERROR = str(exc)
+        with _state_lock:
+            MODEL_ERROR = str(exc)
         log.exception("Ошибка обучения модели: %s", exc)
+        return
+
+    # EDA-графики считаются 1 раз и кэшируются
+    try:
+        eda_charts = m.compute_eda_charts(model.model_df)
+        with _state_lock:
+            EDA_CHARTS = eda_charts
+        log.info("EDA-графики готовы (%d шт.)", len(eda_charts))
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Ошибка генерации EDA-графиков: %s", exc)
 
 
 threading.Thread(target=_train_in_background, daemon=True).start()
-
 
 
 # Валидация входных данных
@@ -116,42 +126,56 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/api/health")
+def health():
+    """Health-check: отвечает всегда, пока процесс жив (не зависит от модели)."""
+    return jsonify({"ok": True})
+
+
 @app.route("/api/status")
 def status():
     """Статус готовности модели."""
+    with _state_lock:
+        ready = MODEL_READY
+        error = MODEL_ERROR
+        base_year = MODEL.base_year if MODEL else None
+        rows = len(MODEL.model_df) if MODEL else None
     return jsonify({
-        "ready": MODEL_READY,
-        "error": MODEL_ERROR,
-        "base_year": MODEL.base_year if MODEL else None,
-        "rows": len(MODEL.model_df) if MODEL else None,
+        "ready": ready,
+        "error": error,
+        "base_year": base_year,
+        "rows": rows,
     })
 
 
 @app.route("/api/reference")
 def reference():
     """Справочные данные для формы (округа, районы, улицы, материалы)."""
-    if REFERENCE is None:
+    with _state_lock:
+        ref = REFERENCE
+    if ref is None:
         return jsonify({"error": "Справочные данные ещё не загружены."}), 503
-    return jsonify(REFERENCE)
+    return jsonify(ref)
 
 
 @app.route("/api/eda")
 def eda():
     """EDA-графики закономерностей цен для вкладки «Закономерности цен»."""
-    if not MODEL_READY or MODEL is None:
+    with _state_lock:
+        charts = EDA_CHARTS
+        ready = MODEL_READY
+    if not ready or charts is None:
         return jsonify({"error": "Модель ещё обучается. Попробуйте позже."}), 503
-    try:
-        charts = m.compute_eda_charts(MODEL.model_df)
-    except Exception as exc:  # noqa: BLE001
-        log.exception("Ошибка генерации EDA-графиков: %s", exc)
-        return jsonify({"error": f"Ошибка генерации EDA-графиков: {exc}"}), 500
     return jsonify(charts)
 
 
 @app.route("/api/predict", methods=["POST"])
 def predict():
     """Прогноз стоимости квартиры на N лет."""
-    if not MODEL_READY or MODEL is None:
+    with _state_lock:
+        model = MODEL
+        ready = MODEL_READY
+    if not ready or model is None:
         return jsonify({"error": "Модель ещё обучается. Попробуйте позже."}), 503
 
     data = request.get_json(silent=True)
@@ -164,7 +188,7 @@ def predict():
         return jsonify({"error": str(exc)}), 400
 
     try:
-        result = MODEL.forecast(apartment, apartment.pop("n_years"))
+        result = model.forecast(apartment, apartment.pop("n_years"))
     except Exception as exc:  # noqa: BLE001
         log.exception("Ошибка прогноза: %s", exc)
         return jsonify({"error": f"Ошибка прогноза: {exc}"}), 500
@@ -191,4 +215,11 @@ def predict():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # многопоточный WSGI-сервер
+    try:
+        from waitress import serve
+    except ImportError:
+        app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
+    else:
+        log.info("Запуск сервера на http://127.0.0.1:5000")
+        serve(app, host="127.0.0.1", port=5000, threads=8)

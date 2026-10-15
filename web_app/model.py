@@ -345,18 +345,86 @@ def train_model() -> PrognosisModel:
 
 
 
+# Кэширование обученной модели на диск.
+# Обучение занимает ~2 минуты, поэтому при каждом перезапуске сервера
+# переобучаться не нужно, если данные и код модели не менялись.
+
+MODEL_CACHE_PATH = BASE_DIR / "web_app" / "model_cache.joblib"
+
+
+def _data_signature() -> dict:
+    """Сигнатура входных данных и кода модели (mtime + размер файлов).
+
+    Если любой из файлов изменился — кэш считается устаревшим.
+    """
+    sig: dict = {}
+    for path in (DATA_PATH, INFLATION_DATA_PATH, Path(__file__)):
+        if path.exists():
+            st = path.stat()
+            sig[str(path)] = (st.st_mtime, st.st_size)
+    return sig
+
+
+def train_model_cached() -> PrognosisModel:
+    """Обучение модели с кэшированием результата на диск.
+
+    Если данные и код модели не менялись, а кэш существует — модель
+    загружается мгновенно. Иначе — обучается заново и сохраняется в кэш.
+    """
+    import joblib
+
+    signature = _data_signature()
+    if MODEL_CACHE_PATH.exists():
+        try:
+            payload = joblib.load(MODEL_CACHE_PATH)
+            if payload.get("signature") == signature:
+                return payload["model"]
+        except Exception:  # noqa: BLE001
+            pass  # повреждённый кэш — просто переобучим
+
+    model = train_model()
+    try:
+        joblib.dump({"signature": signature, "model": model}, MODEL_CACHE_PATH)
+    except Exception:  # noqa: BLE001
+        pass  # не удалось сохранить кэш — не критично
+    return model
+
+
+
 # Справочные данные для формы
 
 def load_reference_data() -> dict:
-    """Списки округов, районов и улиц для выпадающих списков/подсказок."""
+    """Списки округов, районов и улиц для выпадающих списков/подсказок.
+
+    Дополнительно возвращает иерархию «округ → районы» и «район → улицы»,
+    чтобы форма могла показывать в поле «Район» только районы выбранного
+    округа, а в поле «Улица» — только улицы выбранного района.
+    """
     df_raw = read_csv_robust(DATA_PATH)
     regions = sorted(df_raw["region"].dropna().astype(str).unique().tolist())
     districts = sorted(df_raw["district"].dropna().astype(str).unique().tolist())
     streets = sorted(df_raw["street"].dropna().astype(str).unique().tolist())
+
+    # Иерархия: административный округ -> входящие в него районы
+    region_districts: dict[str, list[str]] = {}
+    for region, group in df_raw.groupby("region"):
+        region_districts[str(region)] = sorted(
+            group["district"].dropna().astype(str).unique().tolist()
+        )
+
+    # Иерархия: район -> входящие в него улицы
+    district_streets: dict[str, list[str]] = {}
+    for district, group in df_raw.groupby("district"):
+        district_streets[str(district)] = sorted(
+            group["street"].dropna().astype(str).unique().tolist()
+        )
+
     return {
         "regions": regions,
         "districts": districts,
         "streets": streets,
+        "region_districts": region_districts,
+        "district_streets": district_streets,
         "wall_materials": list(WALL_MATERIAL_NAMES.values()),
     }
 

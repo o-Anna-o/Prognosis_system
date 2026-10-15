@@ -7,6 +7,7 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a4fa0'/%3E%3Ctext x='32' y='45' font-size='38' text-anchor='middle' fill='white' font-family='Arial,sans-serif' font-weight='bold'%3EП%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 </head>
 <body>
     <header class="site-header">
@@ -29,7 +30,6 @@
     </nav>
 
     <main class="container">
-        <!-- ================= Вкладка «Прогноз» ================= -->
         <section id="tab-forecast" class="tab-panel active">
             <section class="card form-card">
                 <h2 class="card-title">Параметры квартиры</h2>
@@ -139,7 +139,6 @@
             </section>
         </section>
 
-        <!-- ================= Вкладка «Закономерности цен» ================= -->
         <section id="tab-eda" class="tab-panel">
             <div class="card">
                 <h2 class="card-title">Закономерности цен на квартиры</h2>
@@ -181,7 +180,7 @@
 
     <footer class="site-footer">
         <div class="container">
-            <p>подготовила Агапова А.Д. 2026 г</p>
+            <p>подготовила Агапова Анна, 2026 г</p>
         </div>
     </footer>
 
