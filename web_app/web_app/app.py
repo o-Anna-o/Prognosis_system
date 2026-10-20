@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Запуск:  .venv\\Scripts\\python.exe web_app\\app.py
 """
