@@ -285,6 +285,8 @@ function renderResult(data) {
 
     renderChart(data.forecast);
     resultSection.classList.remove("hidden");
+    // После расчёта сворачиваем блок параметров, чтобы показать результат.
+    setParamsCollapsed(true);
     resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -449,12 +451,28 @@ async function loadEda(attempt = 0) {
     });
 }
 
-// Инициализация 
+/* Сворачивание блока «Параметры квартиры» */
+
+const paramsCard = document.getElementById("params-card");
+const toggleParamsBtn = document.getElementById("toggle-params-btn");
+
+function setParamsCollapsed(collapsed) {
+    paramsCard.classList.toggle("collapsed", collapsed);
+    toggleParamsBtn.setAttribute("aria-expanded", String(!collapsed));
+}
+
+toggleParamsBtn.addEventListener("click", () => {
+    setParamsCollapsed(!paramsCard.classList.contains("collapsed"));
+});
+
+
+// Инициализация
 form.addEventListener("submit", submitForecast);
 form.addEventListener("reset", () => {
     clearErrors();
     resultSection.classList.add("hidden");
     errorSection.classList.add("hidden");
+    setParamsCollapsed(false);
     lastDistrict = "";
     fillDistrictList("");
     fillStreetList("");
@@ -746,7 +764,7 @@ assistantClear.addEventListener("click", () => {
 
     addAssistantMessage(
         "assistant",
-        "Приветствую! Я — ИИ-агент. Задайте вопрос о прогнозировании или укажите параметры квартиры для расчёта."
+        "Приветствую! Я — ИИ-помощник. Задайте вопрос о прогнозировании или укажите параметры квартиры для расчёта."
     );
 });
 
