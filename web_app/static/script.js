@@ -368,17 +368,50 @@ function showError(message) {
 }
 
 // Вкладки 
+
+/* Вкладки и боковая панель ИИ-помощника */
+
+let activeContentTab = "forecast";
+
 document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
         const tab = btn.dataset.tab;
+
+        if (tab === "assistant") {
+            const isOpen = document.body.classList.toggle(
+                "assistant-drawer-open"
+            );
+
+            document.querySelectorAll(".tab-btn").forEach((b) => {
+                b.classList.toggle(
+                    "active",
+                    b.dataset.tab === (isOpen ? "assistant" : activeContentTab)
+                );
+            });
+
+            document.querySelectorAll(".tab-panel").forEach((panel) => {
+                panel.classList.toggle(
+                    "active",
+                    panel.id === `tab-${activeContentTab}`
+                );
+            });
+
+            return;
+        }
+
+        activeContentTab = tab;
+        document.body.classList.remove("assistant-drawer-open");
+
         document.querySelectorAll(".tab-btn").forEach((b) => {
-            b.classList.toggle("active", b === btn);
+            b.classList.toggle("active", b.dataset.tab === tab);
         });
+
         document.querySelectorAll(".tab-panel").forEach((panel) => {
             panel.classList.toggle("active", panel.id === `tab-${tab}`);
         });
     });
 });
+
 
 // EDA-графики Закономерности цен
 async function loadEda(attempt = 0) {
@@ -433,3 +466,275 @@ document.querySelectorAll("input, select").forEach((el) => {
 checkStatus();
 loadReference();
 loadEda();
+
+
+/* Заполнение формы данными, собранными ИИ-помощником */
+
+function fillForecastFromAssistant(data) {
+    if (!referenceData) {
+        throw new Error("Справочник ещё загружается. Попробуйте повторить запрос.");
+    }
+
+    const required = [
+        "region", "district", "street", "wall_material",
+        "year_build", "floor", "area", "n_years"
+    ];
+
+    for (const key of required) {
+        if (
+            data[key] === undefined ||
+            data[key] === null ||
+            String(data[key]).trim() === ""
+        ) {
+            throw new Error(`Агент не передал обязательный параметр: ${key}.`);
+        }
+    }
+
+    const regions = referenceData.regions || [];
+    const districts =
+        (referenceData.region_districts || {})[data.region] || [];
+    const streets =
+        (referenceData.district_streets || {})[data.district] || [];
+    const materials = referenceData.wall_materials || [];
+
+    if (!regions.includes(data.region)) {
+        throw new Error("Округ не найден в справочнике. Уточните округ.");
+    }
+    if (!districts.includes(data.district)) {
+        throw new Error("Район не относится к выбранному округу.");
+    }
+    if (!streets.includes(data.street)) {
+        throw new Error("Улица не найдена в справочнике выбранного района.");
+    }
+    if (!materials.includes(data.wall_material)) {
+        throw new Error("Материал стен отсутствует в справочнике.");
+    }
+
+    const year = Number(data.year_build);
+    const floorNumber = Number(data.floor);
+    const area = Number(String(data.area).replace(",", "."));
+    const years = Number(data.n_years);
+
+    if (
+        !Number.isInteger(year) ||
+        year < 1800 ||
+        year > new Date().getFullYear() + 5
+    ) {
+        throw new Error("Проверьте год постройки.");
+    }
+    if (!Number.isInteger(floorNumber) || floorNumber < 1) {
+        throw new Error("Этаж должен быть целым числом не меньше 1.");
+    }
+    if (!Number.isFinite(area) || area <= 0) {
+        throw new Error("Площадь должна быть положительным числом.");
+    }
+    if (!Number.isInteger(years) || years < 1 || years > 20) {
+        throw new Error("Горизонт прогноза должен составлять от 1 до 20 лет.");
+    }
+
+    regionSelect.value = data.region;
+    fillDistrictList(data.region);
+
+    districtInput.value = data.district;
+    lastDistrict = data.district;
+    fillStreetList(data.district);
+    streetInput.value = data.street;
+
+    document.getElementById("wall_material").value = data.wall_material;
+    document.getElementById("year_build").value = String(year);
+    document.getElementById("floor").value = String(floorNumber);
+    document.getElementById("area").value = String(area);
+    document.getElementById("n_years").value = String(years);
+
+    clearErrors();
+
+    // Переключаемся на вкладку прогноза.
+    activeContentTab = "forecast";
+    document.body.classList.remove("assistant-drawer-open");
+
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tab === "forecast");
+    });
+
+    document.querySelectorAll(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === "tab-forecast");
+    });
+
+    // Запускаем существующий обработчик формы.
+    form.requestSubmit();
+}
+
+/* ИИ-помощник: отдельный чат */
+
+const assistantForm = document.getElementById("assistant-form");
+const assistantInput = document.getElementById("assistant-input");
+const assistantMessages = document.getElementById("assistant-messages");
+const assistantSend = document.getElementById("assistant-send");
+const assistantClear = document.getElementById("assistant-clear");
+const assistantError = document.getElementById("assistant-error");
+
+// История хранится только в памяти открытой страницы.
+// Она не записывается в localStorage или на диск.
+let assistantHistory = [];
+
+function addAssistantMessage(role, content) {
+    const message = document.createElement("div");
+    message.className = role === "user"
+        ? "assistant-message assistant-message-user"
+        : "assistant-message assistant-message-bot";
+
+    const label = document.createElement("div");
+    label.className = "assistant-message-label";
+    label.textContent = role === "user" ? "Вы" : "ИИ-помощник";
+
+    const text = document.createElement("div");
+    text.className = "assistant-message-text";
+    // Используем textContent, чтобы ответ не интерпретировался как HTML.
+    text.textContent = content;
+
+    message.append(label, text);
+    assistantMessages.appendChild(message);
+    assistantMessages.scrollTop = assistantMessages.scrollHeight;
+
+    return message;
+}
+
+function showAssistantError(message) {
+    assistantError.textContent = message;
+    assistantError.classList.remove("hidden");
+}
+
+function hideAssistantError() {
+    assistantError.textContent = "";
+    assistantError.classList.add("hidden");
+}
+
+assistantForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const message = assistantInput.value.trim();
+
+    if (!message) {
+        showAssistantError("Введите сообщение.");
+        return;
+    }
+
+    if (message.length > 4000) {
+        showAssistantError("Сообщение слишком длинное.");
+        return;
+    }
+
+    hideAssistantError();
+
+    // Отправляем историю предыдущих сообщений.
+    const historyForRequest = assistantHistory.slice(-20);
+
+    addAssistantMessage("user", message);
+    assistantHistory.push({ role: "user", content: message });
+
+    assistantInput.value = "";
+    assistantSend.disabled = true;
+    assistantInput.disabled = true;
+    assistantSend.textContent = "Ожидание…";
+
+    try {
+        const response = await fetch("/api/agent/chat", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                message,
+                history: historyForRequest,
+            }),
+        });
+
+        const responseText = await response.text();
+
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch {
+            console.error("Сервер вернул не JSON:", responseText.slice(0, 1000));
+            throw new Error(
+                `Сервер вернул некорректный ответ (HTTP ${response.status}). ` +
+                "Проверьте терминал Flask."
+            );
+        }
+
+        if (!response.ok) {
+            throw new Error(data.error || `Ошибка HTTP ${response.status}`);
+        }
+
+
+        if (typeof data.answer !== "string" || !data.answer.trim()) {
+            throw new Error("ИИ-помощник вернул пустой ответ.");
+        }
+
+        
+        let visibleAnswer = data.answer;
+        const commandMatch = visibleAnswer.match(
+            /\[\[CALCULATE_JSON\]\]([\s\S]*?)\[\[\/CALCULATE_JSON\]\]/
+        );
+
+        let calculationPayload = null;
+
+        if (commandMatch) {
+            try {
+                calculationPayload = JSON.parse(commandMatch[1]);
+            } catch {
+                throw new Error(
+                    "Агент сформировал некорректные параметры. Попросите его уточнить данные."
+                );
+            }
+
+            visibleAnswer = visibleAnswer.replace(commandMatch[0], "").trim();
+        }
+
+        if (visibleAnswer) {
+            addAssistantMessage("assistant", visibleAnswer);
+            assistantHistory.push({
+                role: "assistant",
+                content: visibleAnswer,
+            });
+        }
+
+        if (calculationPayload) {
+            fillForecastFromAssistant(calculationPayload);
+        }
+
+
+        // Ограничиваем историю, передаваемую при следующих запросах.
+        assistantHistory = assistantHistory.slice(-20);
+    } catch (error) {
+        showAssistantError(
+            error.message || "Ошибка соединения с ИИ-помощником."
+        );
+    } finally {
+        assistantSend.disabled = false;
+        assistantInput.disabled = false;
+        assistantSend.textContent = "Отправить";
+        assistantInput.focus();
+    }
+});
+
+// Enter отправляет сообщение, Shift+Enter добавляет новую строку.
+assistantInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        assistantForm.requestSubmit();
+    }
+});
+
+// Очистка чата удаляет сообщения только из текущей страницы.
+assistantClear.addEventListener("click", () => {
+    assistantHistory = [];
+    assistantMessages.replaceChildren();
+    hideAssistantError();
+
+    addAssistantMessage(
+        "assistant",
+        "Приветствую! Я — ИИ-помощник. Задайте вопрос о прогнозировании или укажите параметры квартиры для расчёта."
+    );
+});
+

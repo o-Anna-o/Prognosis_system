@@ -13,6 +13,9 @@ import model as m
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("prognosis")
 
+from agent.service import chat as agent_chat
+from agent.tools import configure_predictor, configure_reference_provider
+
 app = Flask(__name__)
 
 # Перечитывать шаблоны при каждом запросе и не кэшировать
@@ -212,6 +215,129 @@ def predict():
         "infl_last": result["infl_last"],
         "forecast": forecast_rows,
     })
+
+
+def _predict_for_agent(payload: dict) -> dict:
+    """
+    Использует существующий API прогноза внутри Flask,
+    не обращаясь к самой себе по HTTP.
+    """
+    with app.test_client() as client:
+        response = client.post(
+            "/api/predict",
+            json=payload,
+        )
+
+        try:
+            result = response.get_json()
+        except Exception:
+            result = None
+
+        if response.status_code >= 400:
+            # Не передаём агенту внутренние подробности ошибки.
+            return {
+                "ok": False,
+                "error": (
+                    "Прогноз не выполнен. "
+                    "Проверьте параметры квартиры."
+                ),
+            }
+
+        if not isinstance(result, dict):
+            return {
+                "ok": False,
+                "error": "Не удалось получить результат прогноза.",
+            }
+
+        return result
+
+
+configure_predictor(_predict_for_agent)
+
+
+def _reference_for_agent() -> dict | None:
+    """Передаёт агенту актуальный справочник приложения."""
+    with _state_lock:
+        return REFERENCE
+
+
+configure_reference_provider(_reference_for_agent)
+
+
+
+@app.post("/api/agent/chat")
+def agent_chat_api():
+    """Обрабатывает сообщения локальному ИИ-агенту."""
+    from flask import jsonify, request
+
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify({
+            "error": "Ожидается JSON-объект с полем message."
+        }), 400
+
+    message = payload.get("message")
+
+    if not isinstance(message, str) or not message.strip():
+        return jsonify({
+            "error": "Введите сообщение."
+        }), 400
+
+    
+    if len(message) > 4000:
+        return jsonify({
+            "error": "Сообщение слишком длинное (максимум 4000 символов)."
+        }), 400
+
+    history = payload.get("history", [])
+
+    if not isinstance(history, list):
+        return jsonify({
+            "error": "Поле history должно быть списком сообщений."
+        }), 400
+
+    # Принимаем только последние 20 корректных сообщений чата.
+    history = [
+        {
+            "role": item["role"],
+            "content": item["content"][:4000]
+        }
+        for item in history[-20:]
+        if isinstance(item, dict)
+        and item.get("role") in ("user", "assistant")
+        and isinstance(item.get("content"), str)
+        and item["content"].strip()
+    ]
+
+
+    
+    try:
+        answer = agent_chat(message, history=history)
+
+        return jsonify({
+            "answer": answer,
+        }), 200
+
+    except ValueError as exc:
+        app.logger.exception(
+            "Ошибка данных при обработке сообщения ИИ-помощником."
+        )
+        return jsonify({
+            "error": str(exc),
+        }), 400
+
+    except Exception:
+        app.logger.exception(
+            "Ошибка при обработке сообщения ИИ-помощником"
+        )
+        return jsonify({
+            "error": (
+                "ИИ-помощник временно недоступен. "
+                "Проверьте журнал сервера."
+            )
+        }), 503
+
 
 
 if __name__ == "__main__":
