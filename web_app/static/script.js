@@ -377,22 +377,21 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
         const tab = btn.dataset.tab;
 
+        // Кнопка «ИИ-агент» открывает/закрывает чат слева,
+        // не переключая текущий раздел. Блок прогноза при этом
+        // уменьшается, уступая чату место в раскладке.
         if (tab === "assistant") {
-            const isOpen = document.body.classList.toggle(
-                "assistant-drawer-open"
-            );
+            document.body.classList.toggle("assistant-open");
+
+            const isAssistantActive =
+                document.body.classList.contains("assistant-open");
 
             document.querySelectorAll(".tab-btn").forEach((b) => {
                 b.classList.toggle(
                     "active",
-                    b.dataset.tab === (isOpen ? "assistant" : activeContentTab)
-                );
-            });
-
-            document.querySelectorAll(".tab-panel").forEach((panel) => {
-                panel.classList.toggle(
-                    "active",
-                    panel.id === `tab-${activeContentTab}`
+                    isAssistantActive
+                        ? b.dataset.tab === "assistant"
+                        : b.dataset.tab === activeContentTab
                 );
             });
 
@@ -400,7 +399,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
         }
 
         activeContentTab = tab;
-        document.body.classList.remove("assistant-drawer-open");
+        document.body.classList.remove("assistant-open");
 
         document.querySelectorAll(".tab-btn").forEach((b) => {
             b.classList.toggle("active", b.dataset.tab === tab);
@@ -409,6 +408,15 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
         document.querySelectorAll(".tab-panel").forEach((panel) => {
             panel.classList.toggle("active", panel.id === `tab-${tab}`);
         });
+    });
+});
+
+// Кнопка «крестик» закрывает чат ИИ-агента.
+document.getElementById("assistant-close").addEventListener("click", () => {
+    document.body.classList.remove("assistant-open");
+
+    document.querySelectorAll(".tab-btn").forEach((b) => {
+        b.classList.toggle("active", b.dataset.tab === activeContentTab);
     });
 });
 
@@ -550,7 +558,7 @@ function fillForecastFromAssistant(data) {
 
     // Переключаемся на вкладку прогноза.
     activeContentTab = "forecast";
-    document.body.classList.remove("assistant-drawer-open");
+    document.body.classList.remove("assistant-open");
 
     document.querySelectorAll(".tab-btn").forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.tab === "forecast");
@@ -583,16 +591,20 @@ function addAssistantMessage(role, content) {
         ? "assistant-message assistant-message-user"
         : "assistant-message assistant-message-bot";
 
-    const label = document.createElement("div");
-    label.className = "assistant-message-label";
-    label.textContent = role === "user" ? "Вы" : "ИИ-помощник";
+    // Подпись над сообщением показываем только у пользователя.
+    if (role === "user") {
+        const label = document.createElement("div");
+        label.className = "assistant-message-label";
+        label.textContent = "Вы";
+        message.appendChild(label);
+    }
 
     const text = document.createElement("div");
     text.className = "assistant-message-text";
     // Используем textContent, чтобы ответ не интерпретировался как HTML.
     text.textContent = content;
 
-    message.append(label, text);
+    message.appendChild(text);
     assistantMessages.appendChild(message);
     assistantMessages.scrollTop = assistantMessages.scrollHeight;
 
@@ -734,7 +746,7 @@ assistantClear.addEventListener("click", () => {
 
     addAssistantMessage(
         "assistant",
-        "Приветствую! Я — ИИ-помощник. Задайте вопрос о прогнозировании или укажите параметры квартиры для расчёта."
+        "Приветствую! Я — ИИ-агент. Задайте вопрос о прогнозировании или укажите параметры квартиры для расчёта."
     );
 });
 

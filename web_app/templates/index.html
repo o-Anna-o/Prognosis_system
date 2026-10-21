@@ -37,13 +37,66 @@
             Закономерности цен
         </button>
         <button type="button" class="tab-btn" data-tab="assistant">
-            ИИ-помощник
+            ИИ-агент
         </button>
     </nav>
 
 
     <main class="container">
-        <section id="tab-forecast" class="tab-panel active">
+        <div class="main-layout">
+
+            <aside id="tab-assistant" class="assistant-panel" aria-label="Чат с ИИ-агентом">
+                <section class="card assistant-card">
+                    <div class="assistant-heading">
+                        <div class="assistant-heading-info">
+                            <h2 class="card-title">ИИ-агент</h2>
+                            <p class="assistant-description">
+                                Задавайте вопросы о прогнозировании стоимости квартир
+                                или попросите рассчитать прогноз.
+                            </p>
+                        </div>
+                        <div class="assistant-heading-actions">
+                            <button type="button" id="assistant-clear" class="btn btn-secondary">
+                                Очистить чат
+                            </button>
+                            <button type="button" id="assistant-close" class="assistant-close-btn"
+                                aria-label="Закрыть чат" title="Закрыть чат">✕</button>
+                        </div>
+                    </div>
+
+                    <div id="assistant-messages" class="assistant-messages" role="log" aria-live="polite"
+                        aria-label="Переписка с ИИ-агентом">
+                        <div class="assistant-message assistant-message-bot">
+                            <div class="assistant-message-text">
+                                Здравствуйте! Я помогу разобраться с формой прогноза
+                                и рассчитать стоимость квартиры. Для расчёта понадобятся
+                                округ, район, улица, материал стен, год постройки,
+                                этаж, площадь и горизонт прогноза.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="assistant-error" class="assistant-error hidden" role="alert"></div>
+
+                    <form id="assistant-form" class="assistant-form">
+                        <label for="assistant-input">Ваше сообщение</label>
+                        <div class="assistant-input-row">
+                            <textarea id="assistant-input" name="message" rows="2" maxlength="4000"
+                                placeholder="Например: как рассчитывается прогноз цены?" required></textarea>
+                            <button type="submit" id="assistant-send" class="btn btn-primary">
+                                Отправить
+                            </button>
+                        </div>
+                        <p class="assistant-hint">
+                            Ответ формируется локальной моделью. Проверяйте введённые
+                            параметры квартиры перед расчётом.
+                        </p>
+                    </form>
+                </section>
+            </aside>
+
+            <div class="main-content">
+                <section id="tab-forecast" class="tab-panel active">
             <section class="card form-card">
                 <h2 class="card-title">Параметры квартиры</h2>
                 <form id="forecast-form" novalidate>
@@ -190,53 +243,9 @@
             </div>
         </section>
 
-        <section id="tab-assistant" class="tab-panel">
-            <section class="card assistant-card">
-                <div class="assistant-heading">
-                    <div>
-                        <h2 class="card-title">ИИ-помощник</h2>
-                        <p class="assistant-description">
-                            Задавайте вопросы о прогнозировании стоимости квартир
-                            или попросите рассчитать прогноз.
-                        </p>
-                    </div>
-                    <button type="button" id="assistant-clear" class="btn btn-secondary">
-                        Очистить чат
-                    </button>
-                </div>
+            </div>
 
-                <div id="assistant-messages" class="assistant-messages" role="log" aria-live="polite"
-                    aria-label="Переписка с ИИ-помощником">
-                    <div class="assistant-message assistant-message-bot">
-                        <div class="assistant-message-label">ИИ-помощник</div>
-                        <div class="assistant-message-text">
-                            Здравствуйте! Я помогу разобраться с формой прогноза
-                            и рассчитать стоимость квартиры. Для расчёта понадобятся
-                            округ, район, улица, материал стен, год постройки,
-                            этаж, площадь и горизонт прогноза.
-                        </div>
-                    </div>
-                </div>
-
-                <div id="assistant-error" class="assistant-error hidden" role="alert"></div>
-
-                <form id="assistant-form" class="assistant-form">
-                    <label for="assistant-input">Ваше сообщение</label>
-                    <div class="assistant-input-row">
-                        <textarea id="assistant-input" name="message" rows="2" maxlength="4000"
-                            placeholder="Например: как рассчитывается прогноз цены?" required></textarea>
-                        <button type="submit" id="assistant-send" class="btn btn-primary">
-                            Отправить
-                        </button>
-                    </div>
-                    <p class="assistant-hint">
-                        Ответ формируется локальной моделью. Проверяйте введённые
-                        параметры квартиры перед расчётом.
-                    </p>
-                </form>
-            </section>
-        </section>
-
+        </div>
     </main>
 
     <footer class="site-footer">
