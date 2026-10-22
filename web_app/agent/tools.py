@@ -17,6 +17,17 @@ def configure_reference_provider(callback: Callable[[], dict | None]) -> None:
     _reference_callback = callback
 
 
+def get_reference_data() -> dict | None:
+    """Возвращает справочник приложения (округа, районы, улицы, материалы).
+
+    Используется для детерминированного извлечения параметров
+    из сообщения пользователя до вызова модели.
+    """
+    if _reference_callback is None:
+        return None
+    return _reference_callback()
+
+
 def configure_predictor(callback: Callable[[dict], Any]) -> None:
     """Подключает существующий механизм прогнозирования."""
     global _predict_callback
@@ -57,9 +68,11 @@ def get_prediction_reference(region: str = "", district: str = "") -> str:
     materials = reference.get("wall_materials", [])
     region_districts = reference.get("region_districts", {})
     district_streets = reference.get("district_streets", {})
+    region_names = reference.get("region_names", {})
 
     result = {
         "regions": regions,
+        "region_names": region_names,
         "wall_materials": materials,
     }
 
@@ -77,6 +90,12 @@ def get_prediction_reference(region: str = "", district: str = "") -> str:
             return json.dumps(result, ensure_ascii=False)
         result["selected_district"] = district
         result["streets"] = streets
+        if not streets:
+            # Для новых официальных районов улиц в датасете может не быть.
+            result["street_note"] = (
+                "Список улиц для этого района пуст. "
+                "Улицу можно принять свободным текстом, но нельзя придумывать."
+            )
 
     return json.dumps(result, ensure_ascii=False)
 

@@ -77,51 +77,44 @@ async function loadReference(attempt = 0) {
     });
 }
 
-// Каскадная фильтрация: округ → район → улица
+// Каскадная фильтрация: округ → район (выпадающий список), улица — свободный ввод
 const regionSelect = document.getElementById("region");
-const districtInput = document.getElementById("district");
+const districtSelect = document.getElementById("district");
 const streetInput = document.getElementById("street");
-const districtList = document.getElementById("district-list");
-const streetList = document.getElementById("street-list");
 
 function fillDistrictList(region) {
-    districtList.innerHTML = "";
+    // Сохраняем выбранный район, чтобы не сбрасывать его при обновлении списка.
+    const previous = districtSelect.value;
+    districtSelect.innerHTML = "";
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = " выберите район ";
+    districtSelect.appendChild(placeholder);
+
     if (!region || !referenceData) return;
     const districts = (referenceData.region_districts || {})[region] || [];
     districts.forEach((d) => {
         const opt = document.createElement("option");
         opt.value = d;
-        districtList.appendChild(opt);
+        opt.textContent = d;
+        districtSelect.appendChild(opt);
     });
-}
 
-function fillStreetList(district) {
-    streetList.innerHTML = "";
-    if (!district || !referenceData) return;
-    const streets = (referenceData.district_streets || {})[district] || [];
-    streets.forEach((s) => {
-        const opt = document.createElement("option");
-        opt.value = s;
-        streetList.appendChild(opt);
-    });
+    if (districts.includes(previous)) {
+        districtSelect.value = previous;
+    }
 }
 
 regionSelect.addEventListener("change", () => {
-    districtInput.value = "";
+    districtSelect.value = "";
     streetInput.value = "";
-    lastDistrict = "";
     fillDistrictList(regionSelect.value);
-    fillStreetList("");
 });
 
-let lastDistrict = "";
-districtInput.addEventListener("input", () => {
-    const district = districtInput.value.trim();
-    if (district !== lastDistrict) {
-        lastDistrict = district;
-        streetInput.value = "";
-        fillStreetList(district);
-    }
+districtSelect.addEventListener("change", () => {
+    // При смене района улицу нужно ввести заново.
+    streetInput.value = "";
 });
 
 // Валидация 
@@ -186,10 +179,11 @@ function validateForm() {
         valid = false;
     }
 
-    if (!isNumber(nYears)) {
+    // Горизонт прогноза необязателен: пустое поле означает 5 лет.
+    if (nYears.trim() !== "" && !isNumber(nYears)) {
         setError("n_years", "Горизонт должен быть числом.");
         valid = false;
-    } else {
+    } else if (nYears.trim() !== "") {
         const n = Number(nYears);
         if (n < 1 || n > 20) {
             setError("n_years", "Горизонт — от 1 до 20 лет.");
@@ -215,7 +209,8 @@ async function submitForecast(event) {
         area: document.getElementById("area").value.replace(",", "."),
         year_build: document.getElementById("year_build").value,
         floor: document.getElementById("floor").value,
-        n_years: document.getElementById("n_years").value,
+        // Пустое поле горизонта означает значение по умолчанию 5 лет.
+        n_years: document.getElementById("n_years").value.trim() || "5",
     };
 
     submitBtn.disabled = true;
@@ -473,20 +468,20 @@ form.addEventListener("reset", () => {
     resultSection.classList.add("hidden");
     errorSection.classList.add("hidden");
     setParamsCollapsed(false);
-    lastDistrict = "";
     fillDistrictList("");
-    fillStreetList("");
 });
 
 // Очистка ошибки поля при вводе
 document.querySelectorAll("input, select").forEach((el) => {
-    el.addEventListener("input", () => {
+    const clearFieldError = () => {
         const msg = document.querySelector(`.error-msg[data-for="${el.id}"]`);
         if (msg && msg.textContent) {
             el.classList.remove("invalid");
             msg.textContent = "";
         }
-    });
+    };
+    el.addEventListener("input", clearFieldError);
+    el.addEventListener("change", clearFieldError);
 });
 
 checkStatus();
@@ -503,7 +498,7 @@ function fillForecastFromAssistant(data) {
 
     const required = [
         "region", "district", "street", "wall_material",
-        "year_build", "floor", "area", "n_years"
+        "year_build", "floor", "area"
     ];
 
     for (const key of required) {
@@ -519,8 +514,6 @@ function fillForecastFromAssistant(data) {
     const regions = referenceData.regions || [];
     const districts =
         (referenceData.region_districts || {})[data.region] || [];
-    const streets =
-        (referenceData.district_streets || {})[data.district] || [];
     const materials = referenceData.wall_materials || [];
 
     if (!regions.includes(data.region)) {
@@ -529,8 +522,10 @@ function fillForecastFromAssistant(data) {
     if (!districts.includes(data.district)) {
         throw new Error("Район не относится к выбранному округу.");
     }
-    if (!streets.includes(data.street)) {
-        throw new Error("Улица не найдена в справочнике выбранного района.");
+    // Улица вводится свободным текстом: список улиц датасета может быть
+    // неполным для новых официальных районов, поэтому membership не проверяем.
+    if (!String(data.street).trim()) {
+        throw new Error("Укажите улицу.");
     }
     if (!materials.includes(data.wall_material)) {
         throw new Error("Материал стен отсутствует в справочнике.");
@@ -539,7 +534,9 @@ function fillForecastFromAssistant(data) {
     const year = Number(data.year_build);
     const floorNumber = Number(data.floor);
     const area = Number(String(data.area).replace(",", "."));
-    const years = Number(data.n_years);
+    // Горизонт прогноза необязателен: если агент его не передал, берём 5 лет.
+    const rawYears = String(data.n_years ?? "").trim();
+    const years = rawYears === "" ? 5 : Number(rawYears);
 
     if (
         !Number.isInteger(year) ||
@@ -561,9 +558,7 @@ function fillForecastFromAssistant(data) {
     regionSelect.value = data.region;
     fillDistrictList(data.region);
 
-    districtInput.value = data.district;
-    lastDistrict = data.district;
-    fillStreetList(data.district);
+    districtSelect.value = data.district;
     streetInput.value = data.street;
 
     document.getElementById("wall_material").value = data.wall_material;

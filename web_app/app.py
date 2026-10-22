@@ -94,8 +94,12 @@ def _validate_payload(data: dict) -> dict:
 
     if not region:
         raise ValueError("Выберите административный округ.")
+    if region not in m.OFFICIAL_DISTRICTS:
+        raise ValueError("Выберите административный округ из списка.")
     if not district:
         raise ValueError("Укажите район.")
+    if district not in m.OFFICIAL_DISTRICTS[region]:
+        raise ValueError("Выберите район из списка выбранного округа.")
     if not street:
         raise ValueError("Укажите улицу.")
     if wall_material not in m.WALL_MATERIAL_CODES:
@@ -104,7 +108,13 @@ def _validate_payload(data: dict) -> dict:
     area = _parse_float(data.get("area"), "Площадь", minimum=1.0)
     year_build = _parse_int(data.get("year_build"), "Год постройки", minimum=1800)
     floor = _parse_int(data.get("floor"), "Этаж", minimum=1)
-    n_years = _parse_int(data.get("n_years", 5), "Горизонт прогноза", minimum=1)
+
+    # Горизонт прогноза необязателен: пустое поле означает 5 лет.
+    raw_n_years = data.get("n_years")
+    if raw_n_years is None or str(raw_n_years).strip() == "":
+        n_years = 5
+    else:
+        n_years = _parse_int(raw_n_years, "Горизонт прогноза", minimum=1)
     if n_years > 20:
         raise ValueError("Горизонт прогноза не должен превышать 20 лет.")
 
