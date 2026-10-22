@@ -13,6 +13,11 @@ import model as m
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("prognosis")
 
+from agent.service import chat as agent_chat
+from agent.tools import configure_predictor, configure_reference_provider
+
+from agent.storage import init_storage, get_recent_history, save_turn
+
 app = Flask(__name__)
 
 # Перечитывать шаблоны при каждом запросе и не кэшировать
@@ -91,8 +96,12 @@ def _validate_payload(data: dict) -> dict:
 
     if not region:
         raise ValueError("Выберите административный округ.")
+    if region not in m.OFFICIAL_DISTRICTS:
+        raise ValueError("Выберите административный округ из списка.")
     if not district:
         raise ValueError("Укажите район.")
+    if district not in m.OFFICIAL_DISTRICTS[region]:
+        raise ValueError("Выберите район из списка выбранного округа.")
     if not street:
         raise ValueError("Укажите улицу.")
     if wall_material not in m.WALL_MATERIAL_CODES:
@@ -101,7 +110,13 @@ def _validate_payload(data: dict) -> dict:
     area = _parse_float(data.get("area"), "Площадь", minimum=1.0)
     year_build = _parse_int(data.get("year_build"), "Год постройки", minimum=1800)
     floor = _parse_int(data.get("floor"), "Этаж", minimum=1)
-    n_years = _parse_int(data.get("n_years", 5), "Горизонт прогноза", minimum=1)
+
+    # Горизонт прогноза необязателен: пустое поле означает 5 лет.
+    raw_n_years = data.get("n_years")
+    if raw_n_years is None or str(raw_n_years).strip() == "":
+        n_years = 5
+    else:
+        n_years = _parse_int(raw_n_years, "Горизонт прогноза", minimum=1)
     if n_years > 20:
         raise ValueError("Горизонт прогноза не должен превышать 20 лет.")
 
@@ -212,6 +227,91 @@ def predict():
         "infl_last": result["infl_last"],
         "forecast": forecast_rows,
     })
+
+
+def _predict_for_agent(payload: dict) -> dict:
+    """
+    Использует существующий API прогноза внутри Flask,
+    не обращаясь к самой себе по HTTP.
+    """
+    with app.test_client() as client:
+        response = client.post(
+            "/api/predict",
+            json=payload,
+        )
+
+        try:
+            result = response.get_json()
+        except Exception:
+            result = None
+
+        if response.status_code >= 400:
+            # Не передаём агенту внутренние подробности ошибки.
+            return {
+                "ok": False,
+                "error": (
+                    "Прогноз не выполнен. "
+                    "Проверьте параметры квартиры."
+                ),
+            }
+
+        if not isinstance(result, dict):
+            return {
+                "ok": False,
+                "error": "Не удалось получить результат прогноза.",
+            }
+
+        return result
+
+
+configure_predictor(_predict_for_agent)
+
+
+def _reference_for_agent() -> dict | None:
+    """Передаёт агенту актуальный справочник приложения."""
+    with _state_lock:
+        return REFERENCE
+
+
+configure_reference_provider(_reference_for_agent)
+
+
+
+@app.post("/api/agent/chat")
+def agent_chat_api():
+    try:
+        payload = request.get_json(silent=True) or {}
+        message = payload.get("message")
+
+        if not isinstance(message, str) or not message.strip():
+            return jsonify({"error": "Введите сообщение"}), 400
+
+        message = message.strip()
+
+        if len(message) > 4000:
+            return jsonify({"error": "Сообщение слишком длинное"}), 400
+
+        # Загружаем историю из PostgreSQL
+        init_storage()
+        history = get_recent_history(limit=20)
+
+        # Вызываем существующего агента, не меняя логику прогнозирования
+        answer = agent_chat(message, history=history)
+
+        # Сохраняем сообщения после удаления персональных данных
+        save_turn(message, answer)
+
+        return jsonify({"answer": answer})
+
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    except Exception:
+        app.logger.exception("Ошибка обработки сообщения агента")
+        return jsonify({
+            "error": "Не удалось обработать сообщение"
+        }), 503
+
 
 
 if __name__ == "__main__":

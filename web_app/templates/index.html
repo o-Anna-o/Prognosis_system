@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Прогнозирование стоимости квартиры Москвы</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a4fa0'/%3E%3Ctext x='32' y='45' font-size='38' text-anchor='middle' fill='white' font-family='Arial,sans-serif' font-weight='bold'%3EП%3C/text%3E%3C/svg%3E">
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a4fa0'/%3E%3Ctext x='32' y='45' font-size='38' text-anchor='middle' fill='white' font-family='Arial,sans-serif' font-weight='bold'%3EП%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 </head>
+
 <body>
     <header class="site-header">
         <div class="container header-inner">
@@ -24,15 +28,68 @@
         </div>
     </header>
 
+
     <nav class="tabs container" aria-label="Разделы сайта">
-        <button type="button" class="tab-btn active" data-tab="forecast">Прогноз</button>
-        <button type="button" class="tab-btn" data-tab="eda">Закономерности цен</button>
+        <button type="button" class="tab-btn active" data-tab="forecast">
+            Прогноз
+        </button>
+        <button type="button" class="tab-btn" data-tab="eda">
+            Закономерности цен
+        </button>
+        <button type="button" class="tab-btn" data-tab="assistant">
+            ИИ-помощник
+        </button>
     </nav>
 
+
     <main class="container">
-        <section id="tab-forecast" class="tab-panel active">
-            <section class="card form-card">
+        <div class="main-layout">
+
+            <aside id="tab-assistant" class="assistant-panel" aria-label="Чат с ИИ-помощником">
+                <section class="card assistant-card">
+                    <div class="assistant-heading">
+                        <h2 class="card-title">ИИ-помощник</h2>
+                        <div class="assistant-heading-actions">
+                            <button type="button" id="assistant-clear" class="btn btn-secondary">
+                                Очистить чат
+                            </button>
+                            <button type="button" id="assistant-close" class="assistant-close-btn"
+                                aria-label="Закрыть чат" title="Закрыть чат">✕</button>
+                        </div>
+                    </div>
+
+                    <div id="assistant-messages" class="assistant-messages" role="log" aria-live="polite"
+                        aria-label="Переписка с ИИ-помощником">
+                        <div class="assistant-message assistant-message-bot">
+                            <div class="assistant-message-text">Здравствуйте! Я помогу разобраться с формой прогноза и рассчитать стоимость квартиры. Для расчёта понадобятся округ, район, улица, материал стен, год постройки, этаж и площадь. Горизонт прогноза можно не указывать — по умолчанию возьму 5 лет.</div>
+                        </div>
+                    </div>
+
+                    <div id="assistant-error" class="assistant-error hidden" role="alert"></div>
+
+                    <form id="assistant-form" class="assistant-form">
+                        <label for="assistant-input">Ваше сообщение</label>
+                        <div class="assistant-input-row">
+                            <textarea id="assistant-input" class="btn-send" name="message" rows="2" maxlength="4000"
+                                placeholder="Например: как рассчитывается прогноз цены?" required></textarea>
+                            <button type="submit" id="assistant-send" class="btn btn-primary btn-send">
+                                Отправить
+                            </button>
+                        </div>
+                        <p class="assistant-hint">
+                            Ответ формируется локальной моделью. Проверяйте введённые
+                            параметры квартиры перед расчётом.
+                        </p>
+                    </form>
+                </section>
+            </aside>
+
+            <div class="main-content">
+                <section id="tab-forecast" class="tab-panel active">
+            <section class="card form-card" id="params-card">
                 <h2 class="card-title">Параметры квартиры</h2>
+                <button type="button" id="toggle-params-btn" class="collapse-btn" aria-expanded="true"
+                    aria-label="Свернуть или развернуть параметры" title="Свернуть / развернуть">▲</button>
                 <form id="forecast-form" novalidate>
                     <div class="form-grid">
                         <div class="form-group">
@@ -45,17 +102,16 @@
 
                         <div class="form-group">
                             <label for="district">Район *</label>
-                            <input type="text" id="district" name="district" list="district-list"
-                                   placeholder="Введите район" required autocomplete="off">
-                            <datalist id="district-list"></datalist>
+                            <select id="district" name="district" required>
+                                <option value=""> выберите район </option>
+                            </select>
                             <span class="error-msg" data-for="district"></span>
                         </div>
 
                         <div class="form-group">
                             <label for="street">Улица *</label>
-                            <input type="text" id="street" name="street" list="street-list"
-                                   placeholder="Введите улицу" required autocomplete="off">
-                            <datalist id="street-list"></datalist>
+                            <input type="text" id="street" name="street" placeholder="Введите улицу"
+                                required autocomplete="off">
                             <span class="error-msg" data-for="street"></span>
                         </div>
 
@@ -69,29 +125,29 @@
 
                         <div class="form-group">
                             <label for="area">Площадь, м² *</label>
-                            <input type="text" id="area" name="area" inputmode="decimal"
-                                   placeholder="Введите площадь" required>
+                            <input type="text" id="area" name="area" inputmode="decimal" placeholder="Введите площадь"
+                                required>
                             <span class="error-msg" data-for="area"></span>
                         </div>
 
                         <div class="form-group">
                             <label for="year_build">Год постройки *</label>
                             <input type="text" id="year_build" name="year_build" inputmode="numeric"
-                                   placeholder="Введите год" required>
+                                placeholder="Введите год" required>
                             <span class="error-msg" data-for="year_build"></span>
                         </div>
 
                         <div class="form-group">
                             <label for="floor">Этаж *</label>
-                            <input type="text" id="floor" name="floor" inputmode="numeric"
-                                   placeholder="Введите этаж" required>
+                            <input type="text" id="floor" name="floor" inputmode="numeric" placeholder="Введите этаж"
+                                required>
                             <span class="error-msg" data-for="floor"></span>
                         </div>
 
                         <div class="form-group">
                             <label for="n_years">Горизонт прогноза, лет</label>
                             <input type="text" id="n_years" name="n_years" inputmode="numeric"
-                                   placeholder="Введите число лет" value="5">
+                                placeholder="Введите число лет (по умолчанию 5)">
                             <span class="error-msg" data-for="n_years"></span>
                         </div>
                     </div>
@@ -176,6 +232,10 @@
                 </div>
             </div>
         </section>
+
+            </div>
+
+        </div>
     </main>
 
     <footer class="site-footer">
@@ -186,4 +246,5 @@
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
+
 </html>

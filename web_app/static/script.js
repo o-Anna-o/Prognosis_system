@@ -77,51 +77,44 @@ async function loadReference(attempt = 0) {
     });
 }
 
-// Каскадная фильтрация: округ → район → улица
+// Каскадная фильтрация: округ → район (выпадающий список), улица — свободный ввод
 const regionSelect = document.getElementById("region");
-const districtInput = document.getElementById("district");
+const districtSelect = document.getElementById("district");
 const streetInput = document.getElementById("street");
-const districtList = document.getElementById("district-list");
-const streetList = document.getElementById("street-list");
 
 function fillDistrictList(region) {
-    districtList.innerHTML = "";
+    // Сохраняем выбранный район, чтобы не сбрасывать его при обновлении списка.
+    const previous = districtSelect.value;
+    districtSelect.innerHTML = "";
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = " выберите район ";
+    districtSelect.appendChild(placeholder);
+
     if (!region || !referenceData) return;
     const districts = (referenceData.region_districts || {})[region] || [];
     districts.forEach((d) => {
         const opt = document.createElement("option");
         opt.value = d;
-        districtList.appendChild(opt);
+        opt.textContent = d;
+        districtSelect.appendChild(opt);
     });
-}
 
-function fillStreetList(district) {
-    streetList.innerHTML = "";
-    if (!district || !referenceData) return;
-    const streets = (referenceData.district_streets || {})[district] || [];
-    streets.forEach((s) => {
-        const opt = document.createElement("option");
-        opt.value = s;
-        streetList.appendChild(opt);
-    });
+    if (districts.includes(previous)) {
+        districtSelect.value = previous;
+    }
 }
 
 regionSelect.addEventListener("change", () => {
-    districtInput.value = "";
+    districtSelect.value = "";
     streetInput.value = "";
-    lastDistrict = "";
     fillDistrictList(regionSelect.value);
-    fillStreetList("");
 });
 
-let lastDistrict = "";
-districtInput.addEventListener("input", () => {
-    const district = districtInput.value.trim();
-    if (district !== lastDistrict) {
-        lastDistrict = district;
-        streetInput.value = "";
-        fillStreetList(district);
-    }
+districtSelect.addEventListener("change", () => {
+    // При смене района улицу нужно ввести заново.
+    streetInput.value = "";
 });
 
 // Валидация 
@@ -186,10 +179,11 @@ function validateForm() {
         valid = false;
     }
 
-    if (!isNumber(nYears)) {
+    // Горизонт прогноза необязателен: пустое поле означает 5 лет.
+    if (nYears.trim() !== "" && !isNumber(nYears)) {
         setError("n_years", "Горизонт должен быть числом.");
         valid = false;
-    } else {
+    } else if (nYears.trim() !== "") {
         const n = Number(nYears);
         if (n < 1 || n > 20) {
             setError("n_years", "Горизонт — от 1 до 20 лет.");
@@ -215,7 +209,8 @@ async function submitForecast(event) {
         area: document.getElementById("area").value.replace(",", "."),
         year_build: document.getElementById("year_build").value,
         floor: document.getElementById("floor").value,
-        n_years: document.getElementById("n_years").value,
+        // Пустое поле горизонта означает значение по умолчанию 5 лет.
+        n_years: document.getElementById("n_years").value.trim() || "5",
     };
 
     submitBtn.disabled = true;
@@ -285,6 +280,8 @@ function renderResult(data) {
 
     renderChart(data.forecast);
     resultSection.classList.remove("hidden");
+    // После расчёта сворачиваем блок параметров, чтобы показать результат.
+    setParamsCollapsed(true);
     resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -368,17 +365,58 @@ function showError(message) {
 }
 
 // Вкладки 
+
+/* Вкладки и боковая панель ИИ-помощника */
+
+let activeContentTab = "forecast";
+
 document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
         const tab = btn.dataset.tab;
+
+        // Кнопка «ИИ-агент» открывает/закрывает чат слева,
+        // не переключая текущий раздел. Блок прогноза при этом
+        // уменьшается, уступая чату место в раскладке.
+        if (tab === "assistant") {
+            document.body.classList.toggle("assistant-open");
+
+            const isAssistantActive =
+                document.body.classList.contains("assistant-open");
+
+            document.querySelectorAll(".tab-btn").forEach((b) => {
+                b.classList.toggle(
+                    "active",
+                    isAssistantActive
+                        ? b.dataset.tab === "assistant"
+                        : b.dataset.tab === activeContentTab
+                );
+            });
+
+            return;
+        }
+
+        activeContentTab = tab;
+        document.body.classList.remove("assistant-open");
+
         document.querySelectorAll(".tab-btn").forEach((b) => {
-            b.classList.toggle("active", b === btn);
+            b.classList.toggle("active", b.dataset.tab === tab);
         });
+
         document.querySelectorAll(".tab-panel").forEach((panel) => {
             panel.classList.toggle("active", panel.id === `tab-${tab}`);
         });
     });
 });
+
+// Кнопка «крестик» закрывает чат ИИ-агента.
+document.getElementById("assistant-close").addEventListener("click", () => {
+    document.body.classList.remove("assistant-open");
+
+    document.querySelectorAll(".tab-btn").forEach((b) => {
+        b.classList.toggle("active", b.dataset.tab === activeContentTab);
+    });
+});
+
 
 // EDA-графики Закономерности цен
 async function loadEda(attempt = 0) {
@@ -408,28 +446,320 @@ async function loadEda(attempt = 0) {
     });
 }
 
-// Инициализация 
+/* Сворачивание блока «Параметры квартиры» */
+
+const paramsCard = document.getElementById("params-card");
+const toggleParamsBtn = document.getElementById("toggle-params-btn");
+
+function setParamsCollapsed(collapsed) {
+    paramsCard.classList.toggle("collapsed", collapsed);
+    toggleParamsBtn.setAttribute("aria-expanded", String(!collapsed));
+}
+
+toggleParamsBtn.addEventListener("click", () => {
+    setParamsCollapsed(!paramsCard.classList.contains("collapsed"));
+});
+
+
+// Инициализация
 form.addEventListener("submit", submitForecast);
 form.addEventListener("reset", () => {
     clearErrors();
     resultSection.classList.add("hidden");
     errorSection.classList.add("hidden");
-    lastDistrict = "";
+    setParamsCollapsed(false);
     fillDistrictList("");
-    fillStreetList("");
 });
 
 // Очистка ошибки поля при вводе
 document.querySelectorAll("input, select").forEach((el) => {
-    el.addEventListener("input", () => {
+    const clearFieldError = () => {
         const msg = document.querySelector(`.error-msg[data-for="${el.id}"]`);
         if (msg && msg.textContent) {
             el.classList.remove("invalid");
             msg.textContent = "";
         }
-    });
+    };
+    el.addEventListener("input", clearFieldError);
+    el.addEventListener("change", clearFieldError);
 });
 
 checkStatus();
 loadReference();
 loadEda();
+
+
+/* Заполнение формы данными, собранными ИИ-помощником */
+
+function fillForecastFromAssistant(data) {
+    if (!referenceData) {
+        throw new Error("Справочник ещё загружается. Попробуйте повторить запрос.");
+    }
+
+    const required = [
+        "region", "district", "street", "wall_material",
+        "year_build", "floor", "area"
+    ];
+
+    for (const key of required) {
+        if (
+            data[key] === undefined ||
+            data[key] === null ||
+            String(data[key]).trim() === ""
+        ) {
+            throw new Error(`Агент не передал обязательный параметр: ${key}.`);
+        }
+    }
+
+    const regions = referenceData.regions || [];
+    const districts =
+        (referenceData.region_districts || {})[data.region] || [];
+    const materials = referenceData.wall_materials || [];
+
+    if (!regions.includes(data.region)) {
+        throw new Error("Округ не найден в справочнике. Уточните округ.");
+    }
+    if (!districts.includes(data.district)) {
+        throw new Error("Район не относится к выбранному округу.");
+    }
+    // Улица вводится свободным текстом: список улиц датасета может быть
+    // неполным для новых официальных районов, поэтому membership не проверяем.
+    if (!String(data.street).trim()) {
+        throw new Error("Укажите улицу.");
+    }
+    if (!materials.includes(data.wall_material)) {
+        throw new Error("Материал стен отсутствует в справочнике.");
+    }
+
+    const year = Number(data.year_build);
+    const floorNumber = Number(data.floor);
+    const area = Number(String(data.area).replace(",", "."));
+    // Горизонт прогноза необязателен: если агент его не передал, берём 5 лет.
+    const rawYears = String(data.n_years ?? "").trim();
+    const years = rawYears === "" ? 5 : Number(rawYears);
+
+    if (
+        !Number.isInteger(year) ||
+        year < 1800 ||
+        year > new Date().getFullYear() + 5
+    ) {
+        throw new Error("Проверьте год постройки.");
+    }
+    if (!Number.isInteger(floorNumber) || floorNumber < 1) {
+        throw new Error("Этаж должен быть целым числом не меньше 1.");
+    }
+    if (!Number.isFinite(area) || area <= 0) {
+        throw new Error("Площадь должна быть положительным числом.");
+    }
+    if (!Number.isInteger(years) || years < 1 || years > 20) {
+        throw new Error("Горизонт прогноза должен составлять от 1 до 20 лет.");
+    }
+
+    regionSelect.value = data.region;
+    fillDistrictList(data.region);
+
+    districtSelect.value = data.district;
+    streetInput.value = data.street;
+
+    document.getElementById("wall_material").value = data.wall_material;
+    document.getElementById("year_build").value = String(year);
+    document.getElementById("floor").value = String(floorNumber);
+    document.getElementById("area").value = String(area);
+    document.getElementById("n_years").value = String(years);
+
+    clearErrors();
+
+    // Переключаемся на вкладку прогноза.
+    activeContentTab = "forecast";
+    document.body.classList.remove("assistant-open");
+
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tab === "forecast");
+    });
+
+    document.querySelectorAll(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === "tab-forecast");
+    });
+
+    // Запускаем существующий обработчик формы.
+    form.requestSubmit();
+}
+
+/* ИИ-помощник: отдельный чат */
+
+const assistantForm = document.getElementById("assistant-form");
+const assistantInput = document.getElementById("assistant-input");
+const assistantMessages = document.getElementById("assistant-messages");
+const assistantSend = document.getElementById("assistant-send");
+const assistantClear = document.getElementById("assistant-clear");
+const assistantError = document.getElementById("assistant-error");
+
+// История хранится только в памяти открытой страницы.
+// Она не записывается в localStorage или на диск.
+let assistantHistory = [];
+
+function addAssistantMessage(role, content) {
+    const message = document.createElement("div");
+    message.className = role === "user"
+        ? "assistant-message assistant-message-user"
+        : "assistant-message assistant-message-bot";
+
+    // Подпись над сообщением показываем только у пользователя.
+    if (role === "user") {
+        const label = document.createElement("div");
+        label.className = "assistant-message-label";
+        label.textContent = "Вы";
+        message.appendChild(label);
+    }
+
+    const text = document.createElement("div");
+    text.className = "assistant-message-text";
+    // Используем textContent, чтобы ответ не интерпретировался как HTML.
+    text.textContent = content;
+
+    message.appendChild(text);
+    assistantMessages.appendChild(message);
+    assistantMessages.scrollTop = assistantMessages.scrollHeight;
+
+    return message;
+}
+
+function showAssistantError(message) {
+    assistantError.textContent = message;
+    assistantError.classList.remove("hidden");
+}
+
+function hideAssistantError() {
+    assistantError.textContent = "";
+    assistantError.classList.add("hidden");
+}
+
+assistantForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const message = assistantInput.value.trim();
+
+    if (!message) {
+        showAssistantError("Введите сообщение.");
+        return;
+    }
+
+    if (message.length > 4000) {
+        showAssistantError("Сообщение слишком длинное.");
+        return;
+    }
+
+    hideAssistantError();
+
+    // Отправляем историю предыдущих сообщений.
+    const historyForRequest = assistantHistory.slice(-20);
+
+    addAssistantMessage("user", message);
+    assistantHistory.push({ role: "user", content: message });
+
+    assistantInput.value = "";
+    assistantSend.disabled = true;
+    assistantInput.disabled = true;
+    assistantSend.textContent = "Ожидание…";
+
+    try {
+        const response = await fetch("/api/agent/chat", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                message,
+                history: historyForRequest,
+            }),
+        });
+
+        const responseText = await response.text();
+
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch {
+            console.error("Сервер вернул не JSON:", responseText.slice(0, 1000));
+            throw new Error(
+                `Сервер вернул некорректный ответ (HTTP ${response.status}). ` +
+                "Проверьте терминал Flask."
+            );
+        }
+
+        if (!response.ok) {
+            throw new Error(data.error || `Ошибка HTTP ${response.status}`);
+        }
+
+
+        if (typeof data.answer !== "string" || !data.answer.trim()) {
+            throw new Error("ИИ-помощник вернул пустой ответ.");
+        }
+
+        
+        let visibleAnswer = data.answer;
+        const commandMatch = visibleAnswer.match(
+            /\[\[CALCULATE_JSON\]\]([\s\S]*?)\[\[\/CALCULATE_JSON\]\]/
+        );
+
+        let calculationPayload = null;
+
+        if (commandMatch) {
+            try {
+                calculationPayload = JSON.parse(commandMatch[1]);
+            } catch {
+                throw new Error(
+                    "Агент сформировал некорректные параметры. Попросите его уточнить данные."
+                );
+            }
+
+            visibleAnswer = visibleAnswer.replace(commandMatch[0], "").trim();
+        }
+
+        if (visibleAnswer) {
+            addAssistantMessage("assistant", visibleAnswer);
+            assistantHistory.push({
+                role: "assistant",
+                content: visibleAnswer,
+            });
+        }
+
+        if (calculationPayload) {
+            fillForecastFromAssistant(calculationPayload);
+        }
+
+
+        // Ограничиваем историю, передаваемую при следующих запросах.
+        assistantHistory = assistantHistory.slice(-20);
+    } catch (error) {
+        showAssistantError(
+            error.message || "Ошибка соединения с ИИ-помощником."
+        );
+    } finally {
+        assistantSend.disabled = false;
+        assistantInput.disabled = false;
+        assistantSend.textContent = "Отправить";
+        assistantInput.focus();
+    }
+});
+
+// Enter отправляет сообщение, Shift+Enter добавляет новую строку.
+assistantInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        assistantForm.requestSubmit();
+    }
+});
+
+// Очистка чата удаляет сообщения только из текущей страницы.
+assistantClear.addEventListener("click", () => {
+    assistantHistory = [];
+    assistantMessages.replaceChildren();
+    hideAssistantError();
+
+    addAssistantMessage(
+        "assistant",
+        "Приветствую! Я — ИИ-помощник. Задайте вопрос о прогнозировании или укажите параметры квартиры для расчёта."
+    );
+});
+
