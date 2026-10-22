@@ -1,0 +1,9 @@
+
+.venv/
+
+.env
+
+# Кэш обученной модели (создаётся при запуске web_app/app.py)
+web_app/model_cache.joblib
+
+__pycache__/
