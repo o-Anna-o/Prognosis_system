@@ -163,8 +163,6 @@ def save_turn(user_text, assistant_text):
             (CONVERSATION_ID,),
         )
 
-    # История уже сохранена. Если Ollama временно недоступна,
-    # это не должно отменять ответ пользователю.
     combined = "\n".join(
         part for part in (
             f"Пользователь: {clean_user}" if clean_user else "",
@@ -197,8 +195,6 @@ def save_turn(user_text, assistant_text):
                 ),
             )
     except Exception:
-        # Не выводим тексты сообщений и персональные данные в логи.
-        # Ошибку векторизации можно диагностировать отдельно.
         return
 
 

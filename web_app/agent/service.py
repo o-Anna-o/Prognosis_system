@@ -143,6 +143,70 @@ def _extract_street_phrase(text: str) -> str:
     return value[:1].upper() + value[1:]
 
 
+_YEAR_NUMBER_WORDS = {
+    "один": 1, "одна": 1, "одно": 1, "одного": 1, "одной": 1,
+    "одному": 1, "одну": 1, "одним": 1,
+    "два": 2, "две": 2, "двух": 2, "двум": 2, "двумя": 2,
+    "три": 3, "трех": 3, "трем": 3, "тремя": 3,
+    "четыре": 4, "четырех": 4, "четырем": 4, "четырьмя": 4,
+    "пять": 5, "пяти": 5,
+    "шесть": 6, "шести": 6,
+    "семь": 7, "семи": 7,
+    "восемь": 8, "восьми": 8,
+    "девять": 9, "девяти": 9,
+    "десять": 10, "десяти": 10,
+    "одиннадцать": 11, "одиннадцати": 11,
+    "двенадцать": 12, "двенадцати": 12,
+    "тринадцать": 13, "тринадцати": 13,
+    "четырнадцать": 14, "четырнадцати": 14,
+    "пятнадцать": 15, "пятнадцати": 15,
+    "шестнадцать": 16, "шестнадцати": 16,
+    "семнадцать": 17, "семнадцати": 17,
+    "восемнадцать": 18, "восемнадцати": 18,
+    "девятнадцать": 19, "девятнадцати": 19,
+    "двадцать": 20, "двадцати": 20,
+}
+_YEAR_NUMBER_PATTERN = "|".join(
+    re.escape(word)
+    for word in sorted(_YEAR_NUMBER_WORDS, key=len, reverse=True)
+)
+_YEAR_DURATION_RE = re.compile(
+    rf"(?<!\w)(?P<number>\d{{1,2}}|{_YEAR_NUMBER_PATTERN})"
+    r"\s*-?\s*(?:летн\w*|годичн\w*|лет|год(?:а|ов)?|г\.?)\b"
+)
+_HORIZON_CONTEXT_RE = re.compile(
+    r"(?:"
+    r"\bгоризонт(?:а)?(?:\s+прогноз\w*)?(?:\s+(?:на|составит|равен|будет))*"
+    r"|\b(?:прогноз\w*|спрогнозир\w*|предскаж\w*)(?:\s+\w+){0,4}"
+    r"|\b(?:на|через)\s+(?:(?:ближайш\w*|следующ\w*|предстоящ\w*|"
+    r"последующ\w*|будущ\w*|период)\s+){0,3}"
+    r")\s*[,;:]?\s*$"
+)
+
+
+def _extract_forecast_horizon(text: str) -> int | None:
+    """Извлекает срок прогноза из чисел и числительных в русской фразе."""
+    matches = list(_YEAR_DURATION_RE.finditer(text))
+    if not matches:
+        return None
+
+    contextual = [
+        match for match in matches
+        if _HORIZON_CONTEXT_RE.search(text[max(0, match.start() - 80):match.start()])
+    ]
+    if contextual:
+        match = contextual[-1]
+    elif len(matches) == 1 and text.strip() == matches[0].group(0):
+        # Короткий ответ на уточнение, например «пять лет».
+        match = matches[0]
+    else:
+        return None
+
+    raw_value = match.group("number")
+    value = int(raw_value) if raw_value.isdigit() else _YEAR_NUMBER_WORDS[raw_value]
+    return value if 1 <= value <= 20 else None
+
+
 def _fallback_reference() -> dict[str, Any]:
     """Минимальный справочник из констант модели.
 
@@ -185,17 +249,10 @@ def _extract_parameters(message: str) -> dict[str, Any]:
     params: dict[str, Any] = {}
     text = _normalize(message)
 
-    # n_years — горизонт прогноза: «горизонт прогноза 5 лет», «на 5 лет», «5 лет»
-    m = re.search(
-        r"горизонт(?:\s+прогноза)?\s+(?:на\s+)?(\d{1,2})\s*(?:лет|год(?:а|ов)?|г\.?)",
-        text,
-    )
-    if not m:
-        m = re.search(r"(?:на\s+)?(\d{1,2})\s+лет", text)
-    if m:
-        value = int(m.group(1))
-        if 1 <= value <= 20:
-            params["n_years"] = value
+    # n_years — горизонт прогноза, включая «на 3 года вперёд» и числа словами.
+    n_years = _extract_forecast_horizon(text)
+    if n_years is not None:
+        params["n_years"] = n_years
 
     # year_build — «год постройки 1969», «построена в 1969», «1969 года»
     m = re.search(
