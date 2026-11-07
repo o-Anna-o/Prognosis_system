@@ -52,7 +52,7 @@ function createEmptyParameters(): ApartmentInput {
     year_build: "",
     floor: "",
     area: "",
-    n_years: "",
+    n_years: "5",
   };
 }
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 
 from flask import Flask, jsonify, render_template, request
@@ -70,7 +71,7 @@ def _parse_float(value, field_name: str, minimum: float | None = None) -> float:
         val = float(str(value).replace(",", ".").strip())
     except (TypeError, ValueError):
         raise ValueError(f"Поле «{field_name}» должно быть числом.") from None
-    if val != val:  # NaN
+    if not math.isfinite(val):
         raise ValueError(f"Поле «{field_name}» должно быть числом.")
     if minimum is not None and val < minimum:
         raise ValueError(f"Поле «{field_name}» должно быть не меньше {minimum:g}.")
