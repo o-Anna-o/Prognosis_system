@@ -144,6 +144,72 @@ body {
     margin: 26px 0;
 }
 
+/* Контейнеры многоквартирного прогноза */
+.apartment-list {
+    display: grid;
+    gap: 14px;
+}
+
+.apartment-card .form-card {
+    margin: 26px 0 0;
+}
+
+.btn-add-apartment {
+    justify-self: start;
+    color: var(--blue-800);
+    background: var(--white);
+    border: 1.5px dashed var(--blue-500);
+}
+
+.btn-add-apartment:hover {
+    background: var(--blue-50);
+}
+
+.result-tabs {
+    display: flex;
+    gap: 8px;
+    margin-top: 26px;
+    overflow-x: auto;
+}
+
+.result-tab {
+    flex: 0 0 auto;
+    padding: 10px 18px;
+    color: var(--blue-800);
+    background: var(--white);
+    border: 1.5px solid var(--gray-300);
+    border-radius: 999px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.result-tab[aria-selected="true"] {
+    color: var(--white);
+    background: var(--blue-700);
+    border-color: var(--blue-700);
+}
+
+.comparison-container,
+.individual-forecast-container .card {
+    margin-top: 18px;
+}
+
+.container-placeholder {
+    min-height: 72px;
+    display: flex;
+    align-items: center;
+    padding: 18px;
+    color: var(--gray-500);
+    background: var(--gray-50);
+    border: 1px dashed var(--gray-300);
+    border-radius: 10px;
+}
+
+.individual-forecast-container:has(#result-section:not(.hidden)) .forecast-placeholder {
+    display: none;
+}
+
 .card-title {
     font-size: 19px;
     color: var(--blue-900);
