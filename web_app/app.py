@@ -132,6 +132,44 @@ def _validate_payload(data: dict) -> dict:
     }
 
 
+class _PayloadValidationError(ValueError):
+    """Ошибка пользовательских параметров, возвращаемая API как HTTP 400."""
+
+
+def _build_prediction(model: m.PrognosisModel, payload: dict | list[dict]) -> dict | list[dict]:
+    """Получает и формирует прогноз для одной квартиры или списка квартир."""
+    if isinstance(payload, list):
+        return [_build_prediction(model, apartment) for apartment in payload]
+    if not isinstance(payload, dict):
+        raise _PayloadValidationError("Некорректные параметры квартиры.")
+
+    try:
+        apartment = _validate_payload(payload)
+    except ValueError as exc:
+        raise _PayloadValidationError(str(exc)) from exc
+    n_years = apartment.pop("n_years")
+    result = model.forecast(apartment, n_years)
+
+    return {
+        "apartment": {
+            "region": apartment["region"],
+            "district": apartment["district"],
+            "street": apartment["street"],
+            "wall_material": m.WALL_MATERIAL_NAMES[apartment["wall_material_code"]],
+            "year_build": apartment["year_build"],
+            "floor": apartment["floor"],
+            "area": apartment["area"],
+        },
+        "base_year": result["base_year"],
+        "base_price": round(result["base_price"], 2),
+        "coef_region": round(result["coef_region"], 3),
+        "avg_inflation_level": result["avg_inflation_level"],
+        "infl_first": result["infl_first"],
+        "infl_last": result["infl_last"],
+        "forecast": result["forecast"].to_dict(orient="records"),
+    }
+
+
 
 # Маршруты
 
@@ -198,34 +236,91 @@ def predict():
         return jsonify({"error": "Некорректный JSON-запрос."}), 400
 
     try:
-        apartment = _validate_payload(data)
-    except ValueError as exc:
+        prediction = _build_prediction(model, data)
+    except _PayloadValidationError as exc:
         return jsonify({"error": str(exc)}), 400
-
-    try:
-        result = model.forecast(apartment, apartment.pop("n_years"))
     except Exception as exc:  # noqa: BLE001
         log.exception("Ошибка прогноза: %s", exc)
         return jsonify({"error": f"Ошибка прогноза: {exc}"}), 500
 
-    forecast_rows = result["forecast"].to_dict(orient="records")
+    return jsonify(prediction)
+
+
+@app.route("/api/predict/batch", methods=["POST"])
+def predict_batch():
+    """Строит индивидуальные прогнозы для списка квартир и общий горизонт сравнения."""
+    with _state_lock:
+        model = MODEL
+        ready = MODEL_READY
+    if not ready or model is None:
+        return jsonify({"error": "Модель ещё обучается. Попробуйте позже."}), 503
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, list) or not data:
+        return jsonify({"error": "Ожидается непустой JSON-массив квартир."}), 400
+
+    validated = []
+    try:
+        # Проверяем каждый объект до первого обращения к прогнозу.
+        for index, item in enumerate(data, start=1):
+            if not isinstance(item, dict):
+                raise _PayloadValidationError(
+                    f"Квартира {index}, поле «объект»: ожидается JSON-объект."
+                )
+            try:
+                apartment = _validate_payload(item)
+            except ValueError as exc:
+                message = str(exc)
+                field_names = (
+                    ("административный округ", "region"),
+                    ("район", "district"),
+                    ("улицу", "street"),
+                    ("материал стен", "wall_material"),
+                    ("Площадь", "area"),
+                    ("Год постройки", "year_build"),
+                    ("Этаж", "floor"),
+                    ("Горизонт прогноза", "n_years"),
+                )
+                field = next(
+                    (name for label, name in field_names if label.casefold() in message.casefold()),
+                    "параметры квартиры",
+                )
+                raise _PayloadValidationError(
+                    f"Квартира {index}, поле «{field}»: {exc}"
+                ) from exc
+            validated.append((item.get("client_id"), apartment))
+    except _PayloadValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    try:
+        # Передаём нормализованные данные существующему общему построителю прогноза.
+        results = []
+        for client_id, apartment in validated:
+            prediction = _build_prediction(model, {
+                **apartment,
+                "wall_material": m.WALL_MATERIAL_NAMES[apartment["wall_material_code"]],
+            })
+            results.append({"client_id": client_id, "prediction": prediction})
+
+        common_horizon = min(len(item["prediction"]["forecast"]) for item in results)
+        comparison = [
+            {
+                "client_id": item["client_id"],
+                "forecast": item["prediction"]["forecast"][:common_horizon],
+            }
+            for item in results
+        ]
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Ошибка пакетного прогноза: %s", exc)
+        return jsonify({"error": f"Ошибка прогноза: {exc}"}), 500
+
     return jsonify({
-        "apartment": {
-            "region": apartment["region"],
-            "district": apartment["district"],
-            "street": apartment["street"],
-            "wall_material": m.WALL_MATERIAL_NAMES[apartment["wall_material_code"]],
-            "year_build": apartment["year_build"],
-            "floor": apartment["floor"],
-            "area": apartment["area"],
+        "results": results,
+        "comparison": {
+            "horizon_years": common_horizon,
+            "base_year": results[0]["prediction"]["base_year"],
+            "forecasts": comparison,
         },
-        "base_year": result["base_year"],
-        "base_price": round(result["base_price"], 2),
-        "coef_region": round(result["coef_region"], 3),
-        "avg_inflation_level": result["avg_inflation_level"],
-        "infl_first": result["infl_first"],
-        "infl_last": result["infl_last"],
-        "forecast": forecast_rows,
     })
 
 
