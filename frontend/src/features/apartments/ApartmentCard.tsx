@@ -23,6 +23,14 @@ interface ApartmentCardProps {
   onParameterChange: (id: string, patch: ApartmentParameterPatch) => void;
 }
 
+function CollapseArrowIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true" focusable="false">
+      <path d="M4 11.5L9 6.5L14 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function ApartmentCard({ id, order, apartmentCount, isFirstApartment, title, parameters, reference, collapsed, calculating, predictionStale, error, onToggleCollapsed, onRemove, onAdd, onPredict, onParameterChange }: ApartmentCardProps) {
   const [touched, setTouched] = useState<Partial<Record<ApartmentField, boolean>>>({});
   const [horizonFocused, setHorizonFocused] = useState(false);
@@ -57,7 +65,6 @@ export function ApartmentCard({ id, order, apartmentCount, isFirstApartment, tit
   return (
     <article id={`apartment-card-${order}`} className={`card form-card apartment-card ${styles.card} ${collapsed ? "collapsed" : ""}`} aria-labelledby={`${id}-title`}>
       <h2 className={`card-title ${styles.title}`} id={`${id}-title`}>{title}</h2>
-      {apartmentCount > 1 && <button type="button" className="apartment-remove-btn" aria-label={`Удалить квартиру №${order}`} title="Удалить квартиру" disabled={calculating} onClick={() => onRemove(id)}>×</button>}
       {!collapsed && <>
       <div id={`${id}-fields`} className="form-grid">
         <div className="form-group">
@@ -115,11 +122,13 @@ export function ApartmentCard({ id, order, apartmentCount, isFirstApartment, tit
         {apartmentCount === 1 && <button type="button" className="btn btn-primary" disabled={calculating} onClick={() => onPredict(id)}>{calculating ? "Расчёт…" : "Рассчитать прогноз"}</button>}
         <button type="button" className="btn btn-secondary" onClick={() => onParameterChange(id, { region: "", district: "", street: "", wall_material: "", year_build: "", floor: "", area: "", n_years: "5" })}>Сбросить</button>
         {isFirstApartment && <button type="button" className="btn btn-secondary" disabled={calculating} onClick={onAdd}>+ Добавить квартиру</button>}
+        {apartmentCount > 1 && <button type="button" className="apartment-remove-btn" aria-label={`Удалить квартиру №${order}`} title="Удалить квартиру" disabled={calculating} onClick={() => onRemove(id)}>×</button>}
+        <button type="button" id={order === 1 ? "toggle-params-btn" : `toggle-params-btn-${order}`} className="collapse-btn" aria-expanded aria-label="Свернуть параметры квартиры" onClick={() => onToggleCollapsed(id)}><CollapseArrowIcon /></button>
       </div>
       {predictionStale && <p role="status">Параметры изменены — прогноз устарел. Рассчитайте его снова.</p>}
       {error && <p className="error-msg" role="alert">{error}</p>}
       </>}
-      <button type="button" id={order === 1 ? "toggle-params-btn" : `toggle-params-btn-${order}`} className={`collapse-btn ${collapsed ? "collapsed-toggle" : "expanded-toggle"}`} aria-expanded={!collapsed} aria-label={collapsed ? "Развернуть параметры квартиры" : "Свернуть параметры квартиры"} onClick={() => onToggleCollapsed(id)}>▲</button>
+      {collapsed && <button type="button" id={order === 1 ? "toggle-params-btn" : `toggle-params-btn-${order}`} className="collapse-btn" aria-expanded={false} aria-label="Развернуть параметры квартиры" onClick={() => onToggleCollapsed(id)}><CollapseArrowIcon /></button>}
     </article>
   );
 }

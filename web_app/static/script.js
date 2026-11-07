@@ -410,6 +410,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 
         activeContentTab = tab;
         document.body.classList.remove("assistant-open");
+        if (tab === "eda") void loadEda();
 
         document.querySelectorAll(".tab-btn").forEach((b) => {
             b.classList.toggle("active", b.dataset.tab === tab);
@@ -431,8 +432,13 @@ document.getElementById("assistant-close").addEventListener("click", () => {
 });
 
 
-// EDA-графики Закономерности цен
+// EDA-графики Закономерности цен (загружаются лениво — при открытии вкладки,
+// чтобы не создавать 503-запросы, пока модель обучается в фоне)
+let edaRequested = false;
+
 async function loadEda(attempt = 0) {
+    if (attempt === 0 && edaRequested) return;
+    edaRequested = true;
     const imgs = {
         wall_material: document.getElementById("eda-wall-chart"),
         districts: document.getElementById("eda-district-chart"),
@@ -543,7 +549,6 @@ document.querySelectorAll("input, select").forEach((el) => {
 
 checkStatus();
 loadReference();
-loadEda();
 
 
 /* Заполнение формы данными, собранными ИИ-помощником */

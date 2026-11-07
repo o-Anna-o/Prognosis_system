@@ -70,7 +70,7 @@ function apartmentsReducer(state: ApartmentsState, action: ApartmentsAction): Ap
         parameters: action.parameters,
         prediction: null,
         isPredictionStale: false,
-        isCollapsed: state.apartments.length > 0,
+        isCollapsed: false,
         isCalculating: false,
         error: null,
       };

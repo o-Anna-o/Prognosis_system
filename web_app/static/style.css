@@ -241,9 +241,6 @@ body {
 }
 
 .apartment-remove-btn {
-    position: absolute;
-    top: 17px;
-    right: 18px;
     display: inline-flex;
     width: 34px;
     height: 34px;

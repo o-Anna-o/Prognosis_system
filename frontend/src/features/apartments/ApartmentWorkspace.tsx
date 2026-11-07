@@ -13,7 +13,7 @@ declare global {
 interface ChartConfig {
   type: "line";
   data: { labels: number[]; datasets: { label: string; data: number[]; borderColor: string; backgroundColor: string; tension: number; pointBackgroundColor: string; pointRadius: number; pointHoverRadius: number; borderWidth: number; fill: boolean }[] };
-  options: { responsive: boolean; maintainAspectRatio: boolean; layout: { padding: { top: number } }; interaction: { mode: "nearest"; intersect: boolean }; plugins: { legend: { position: "bottom"; labels: { color: string; font: { size: number } } }; tooltip: { callbacks: { label: (context: { dataset: { label: string }; parsed: { y: number }; dataIndex: number }) => string } }; datalabels: { color: string; anchor: "end"; align: "top"; offset: number; font: { size: number; weight: "bold" }; formatter: (value: number) => string; hover: { color: string; font: { size: number; weight: "bold" } } } }; scales: { x: { title: { display: boolean; text: string }; ticks: { color: string }; grid: { color: string } }; y: { title: { display: boolean; text: string; color: string }; ticks: { color: string }; grid: { color: string } } } };
+  options: { responsive: boolean; maintainAspectRatio: boolean; layout: { padding: { top: number } }; interaction: { mode: "nearest"; intersect: boolean }; plugins: { legend: { position: "bottom"; labels: { color: string; font: { size: number } } }; tooltip: { callbacks: { label: (context: { dataset: { label: string }; parsed: { y: number }; dataIndex: number }) => string } }; datalabels: { display?: boolean; color?: string; anchor?: "end"; align?: "top"; offset?: number; font?: { size: number; weight: "bold" }; formatter?: (value: number) => string; hover?: { color: string; font: { size: number; weight: "bold" } } } }; scales: { x: { title: { display: boolean; text: string }; ticks: { color: string }; grid: { color: string } }; y: { title: { display: boolean; text: string; color: string }; ticks: { color: string }; grid: { color: string } } } };
 }
 
 const colors = ["#123A7A", "#0077B6", "#5A189A", "#2563EB", "#7B2CBF", "#005F99", "#4F46E5", "#9D4EDD"];
@@ -26,7 +26,7 @@ function apartmentTitle(order: number, streetValue: string, allStreets: string[]
   const matchingStreets = allStreets.filter((candidate) => candidate.trim().toLocaleLowerCase("ru-RU") === street.toLocaleLowerCase("ru-RU")).length;
   return matchingStreets > 1 ? `Квартира №${order} на ул. ${street}` : `Квартира на ул. ${street}`;
 }
-const chartOptions = (label: string, years: number[]): ChartConfig["options"] => ({
+const chartOptions = (label: string, years: number[], showDataLabels = true): ChartConfig["options"] => ({
   responsive: true,
   maintainAspectRatio: false,
   layout: { padding: { top: 30 } },
@@ -34,7 +34,9 @@ const chartOptions = (label: string, years: number[]): ChartConfig["options"] =>
   plugins: {
     legend: { position: "bottom", labels: { color: "#0f172a", font: { size: 13 } } },
     tooltip: { callbacks: { label: (item) => ` ${item.dataset.label}: ${item.parsed.y.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} млн руб. (${years[item.dataIndex]} г.)` } },
-    datalabels: { color: label, anchor: "end", align: "top", offset: 6, font: { size: 12, weight: "bold" }, formatter: (value) => value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), hover: { color: "#0f172a", font: { size: 18, weight: "bold" } } },
+    datalabels: showDataLabels
+      ? { color: label, anchor: "end", align: "top", offset: 6, font: { size: 12, weight: "bold" }, formatter: (value) => value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), hover: { color: "#0f172a", font: { size: 18, weight: "bold" } } }
+      : { display: false },
   },
   scales: {
     x: { title: { display: true, text: "Год" }, ticks: { color: "#334155" }, grid: { color: "rgba(203, 213, 225, 0.4)" } },
@@ -65,7 +67,7 @@ function ApartmentComparison({ results }: { results: { id: string; order: number
             return { label: item.title, data: comparison.years.map((year) => points.get(year) ?? 0), borderColor: color, backgroundColor: color, pointBackgroundColor: color, tension: 0.25, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5, fill: false };
           }),
         },
-        options: chartOptions("#1a4fa0", comparison.years),
+        options: chartOptions("#1a4fa0", comparison.years, false),
       });
     }, 100);
     return () => { window.clearInterval(timer); chart?.destroy(); };
@@ -78,13 +80,15 @@ function ApartmentComparison({ results }: { results: { id: string; order: number
     <p>Общий период: {comparison.years[0]}–{comparison.years.at(-1)} гг.</p>
     <h3>Сводная таблица прогнозов по квартирам</h3>
     <div className="table-wrap"><table className="forecast-table comparison-forecast-table">
-      <thead><tr><th rowSpan={2}>Год</th>{results.map((item) => <th key={item.id} colSpan={2}>{item.title}</th>)}</tr>
-        <tr>{results.flatMap((item) => [<th key={`${item.id}-price`}>Прогноз цены, млн руб.</th>, <th key={`${item.id}-inflation`}>Инфляция, %</th>])}</tr>
+      <thead><tr><th rowSpan={2}>Год</th>{results.map((item) => <th key={item.id}>{item.title}</th>)}<th rowSpan={2}>Инфляция, %</th></tr>
+        <tr>{results.map((item) => <th key={`${item.id}-price`}>Прогноз цены, млн руб.</th>)}</tr>
       </thead>
-      <tbody>{comparison.years.map((year) => <tr key={year}><td>{year}</td>{results.flatMap((item) => {
+      <tbody>{comparison.years.map((year) => <tr key={year}><td>{year}</td>{results.map((item) => {
         const point = item.result.forecast.find((forecast) => forecast.Год === year);
-        return [<td key={`${item.id}-${year}-price`}>{point?.["Прогноз цены, млн руб."].toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? "—"}</td>, <td key={`${item.id}-${year}-inflation`}>{point?.["Инфляция, %"].toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) ?? "—"}</td>];
-      })}</tr>)}</tbody>
+        return <td key={`${item.id}-${year}-price`}>{point?.["Прогноз цены, млн руб."].toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? "—"}</td>;
+      })}
+        <td>{results[0]?.result.forecast.find((forecast) => forecast.Год === year)?.["Инфляция, %"].toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) ?? "—"}</td>
+      </tr>)}</tbody>
     </table></div>
     <h3>Общий прогноз</h3><div className="chart-wrap comparison-chart"><canvas ref={canvasRef} /></div>
     <h3>Итоговый рейтинг перспективности квартир</h3><div className="table-wrap"><table className="forecast-table"><thead><tr><th>Место</th><th>Улица</th><th>Начальная стоимость</th><th>Конечная стоимость</th><th>Прирост</th><th>Рост, %</th></tr></thead><tbody>

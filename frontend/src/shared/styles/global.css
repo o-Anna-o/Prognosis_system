@@ -151,7 +151,7 @@ body {
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     padding: 26px 28px;
-    margin: 26px 0;
+    margin: 10px 0;
 }
 
 .card-title {
@@ -196,9 +196,6 @@ body {
 }
 
 .apartment-remove-btn {
-    position: absolute;
-    top: 17px;
-    right: 18px;
     display: inline-flex;
     width: 34px;
     height: 34px;
@@ -229,7 +226,7 @@ body {
 
 .apartment-list {
     display: grid;
-    gap: 14px;
+    gap: 5px;
 }
 
 .result-tabs {
@@ -270,11 +267,11 @@ body {
 }
 
 .form-card.collapsed .collapse-btn {
-    transform: rotate(180deg);
     position: absolute;
-    top: 20px;
-    right: 64px;
+    top: 50%;
+    right: 18px;
     margin: 0;
+    transform: translateY(-50%) rotate(180deg);
 }
 
 .form-group input[readonly] { cursor: pointer; }
@@ -330,10 +327,21 @@ body {
 }
 
 .form-actions {
+    position: relative;
     display: flex;
     gap: 12px;
     margin-top: 22px;
     flex-wrap: wrap;
+}
+
+/* Кнопка сворачивания: внутри карточки у правого края, по вертикали
+   отцентрирована относительно ряда кнопок формы */
+.form-actions .collapse-btn {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    margin: 0;
 }
 
 .btn {
