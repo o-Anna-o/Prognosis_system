@@ -6,8 +6,9 @@ from __future__ import annotations
 import logging
 import math
 import threading
+from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 import model as m
 
@@ -20,6 +21,7 @@ from agent.tools import configure_predictor, configure_reference_provider
 from agent.storage import init_storage, get_recent_history, save_turn
 
 app = Flask(__name__)
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 # Перечитывать шаблоны при каждом запросе и не кэшировать
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -176,8 +178,16 @@ def _build_prediction(model: m.PrognosisModel, payload: dict | list[dict]) -> di
 
 @app.route("/")
 def index():
-    """Главная страница с формой."""
+    """Отдаёт собранный React-интерфейс; оставляет legacy-шаблон как fallback."""
+    if (FRONTEND_DIST / "index.html").is_file():
+        return send_from_directory(FRONTEND_DIST, "index.html")
     return render_template("index.html")
+
+
+@app.route("/assets/<path:filename>")
+def frontend_assets(filename: str):
+    """Статические файлы production-сборки React."""
+    return send_from_directory(FRONTEND_DIST / "assets", filename)
 
 
 @app.route("/api/health")

@@ -9,6 +9,8 @@ export interface ApartmentState {
   prediction: PredictionResult | null;
   isPredictionStale: boolean;
   isCollapsed: boolean;
+  isCalculating: boolean;
+  error: string | null;
 }
 
 export interface ApartmentsState {

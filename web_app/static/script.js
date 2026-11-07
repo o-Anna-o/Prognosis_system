@@ -61,7 +61,7 @@ async function loadReference(attempt = 0) {
     const data = await res.json();
     referenceData = data;
 
-    const cards = Array.from(document.querySelectorAll(".apartment-card"));
+    const cards = Array.from(document.querySelectorAll(".legacy-apartment-card"));
     if (!cards.length && regionSelect) cards.push(regionSelect.closest("form"));
 
     cards.filter(Boolean).forEach((card) => {
@@ -459,29 +459,73 @@ async function loadEda(attempt = 0) {
     });
 }
 
-/* Сворачивание блока «Параметры квартиры» */
+/* Независимое сворачивание карточек и заголовок по улице */
 
-const paramsCard = document.getElementById("params-card");
-const toggleParamsBtn = document.getElementById("toggle-params-btn");
+const apartmentList = document.querySelector(".legacy-apartment-list");
 
-function setParamsCollapsed(collapsed) {
-    paramsCard.classList.toggle("collapsed", collapsed);
-    toggleParamsBtn.setAttribute("aria-expanded", String(!collapsed));
+function updateApartmentTitle(card) {
+    const title = card.querySelector(".form-card .card-title");
+    const street = card.querySelector('[name="street"]');
+    const number = card.dataset.apartmentNumber || "1";
+    if (!title) return;
+
+    const streetName = street?.value.trim();
+    title.textContent = streetName ? `ул. ${streetName}` : `Новая квартира №${number}`;
 }
 
-toggleParamsBtn.addEventListener("click", () => {
-    setParamsCollapsed(!paramsCard.classList.contains("collapsed"));
-});
+function setApartmentCardCollapsed(card, collapsed) {
+    const button = card.querySelector(".collapse-btn");
+    card.querySelector(".form-card")?.classList.toggle("collapsed", collapsed);
+    button?.setAttribute("aria-expanded", String(!collapsed));
+}
+
+function initializeApartmentCard(card, index) {
+    card.dataset.apartmentNumber ||= String(index + 1);
+    setApartmentCardCollapsed(card, true);
+    updateApartmentTitle(card);
+}
+
+function setParamsCollapsed(collapsed) {
+    const card = document.getElementById("apartment-card-1");
+    if (card) setApartmentCardCollapsed(card, collapsed);
+}
+
+if (apartmentList) {
+    apartmentList.querySelectorAll(".apartment-card").forEach(initializeApartmentCard);
+    new MutationObserver((records) => {
+        records.flatMap((record) => Array.from(record.addedNodes))
+            .filter((node) => node instanceof Element)
+            .flatMap((node) => [
+                ...(node.matches(".apartment-card") ? [node] : []),
+                ...node.querySelectorAll(".apartment-card"),
+            ])
+            .forEach((card) => {
+                const cards = Array.from(apartmentList.querySelectorAll(".apartment-card"));
+                initializeApartmentCard(card, cards.indexOf(card));
+            });
+    }).observe(apartmentList, { childList: true, subtree: true });
+    apartmentList.addEventListener("click", (event) => {
+        const button = event.target.closest(".collapse-btn");
+        const card = button?.closest(".apartment-card");
+        if (!card) return;
+        setApartmentCardCollapsed(card, !card.querySelector(".form-card").classList.contains("collapsed"));
+    });
+    apartmentList.addEventListener("input", (event) => {
+        const street = event.target.closest('[name="street"]');
+        if (street) updateApartmentTitle(street.closest(".apartment-card"));
+    });
+}
 
 
 // Инициализация
-form.addEventListener("submit", submitForecast);
-form.addEventListener("reset", () => {
+form?.addEventListener("submit", submitForecast);
+form?.addEventListener("reset", () => {
     clearErrors();
     resultSection.classList.add("hidden");
     errorSection.classList.add("hidden");
-    setParamsCollapsed(false);
     fillDistrictList("");
+    const card = document.getElementById("apartment-card-1");
+    if (card) setTimeout(() => updateApartmentTitle(card), 0);
 });
 
 // Очистка ошибки поля при вводе
@@ -573,6 +617,7 @@ function fillForecastFromAssistant(data) {
 
     districtSelect.value = data.district;
     streetInput.value = data.street;
+    updateApartmentTitle(streetInput.closest(".apartment-card"));
 
     document.getElementById("wall_material").value = data.wall_material;
     document.getElementById("year_build").value = String(year);

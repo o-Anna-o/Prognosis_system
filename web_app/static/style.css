@@ -154,17 +154,6 @@ body {
     margin: 26px 0 0;
 }
 
-.btn-add-apartment {
-    justify-self: start;
-    color: var(--blue-800);
-    background: var(--white);
-    border: 1.5px dashed var(--blue-500);
-}
-
-.btn-add-apartment:hover {
-    background: var(--blue-50);
-}
-
 .result-tabs {
     display: flex;
     gap: 8px;
@@ -224,14 +213,16 @@ body {
     position: relative;
 }
 
+.apartment-card {
+    display: flex;
+    flex-direction: column;
+}
+
 .form-card .card-title {
-    padding-right: 48px;
+    padding-right: 72px;
 }
 
 .collapse-btn {
-    position: absolute;
-    top: 20px;
-    right: 22px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -246,7 +237,31 @@ body {
     line-height: 1;
     cursor: pointer;
     transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.2s;
+    margin: 18px 0 0 auto;
 }
+
+.apartment-remove-btn {
+    position: absolute;
+    top: 17px;
+    right: 18px;
+    display: inline-flex;
+    width: 34px;
+    height: 34px;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1.5px solid var(--gray-300);
+    border-radius: 8px;
+    background: var(--gray-100);
+    color: var(--blue-900);
+    font-size: 23px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.apartment-remove-btn:hover { background: var(--blue-50); border-color: var(--blue-500); }
+.apartment-remove-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.shared-horizon-note { color: var(--gray-700); line-height: 1.4; }
 
 .collapse-btn:hover {
     background: var(--blue-50);
@@ -259,7 +274,13 @@ body {
 
 .form-card.collapsed .collapse-btn {
     transform: rotate(180deg);
+    position: absolute;
+    top: 20px;
+    right: 64px;
+    margin: 0;
 }
+
+.form-group input[readonly] { cursor: pointer; }
 
 .form-grid {
     display: grid;
