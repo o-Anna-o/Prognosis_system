@@ -5,6 +5,8 @@ export interface ApartmentState {
   id: string;
   /** Порядковый номер добавления. При удалении других квартир не меняется. */
   order: number;
+  /** Перемонтирует поля формы при общем сбросе, очищая локальные ошибки ввода. */
+  formRevision: number;
   parameters: ApartmentInput;
   prediction: PredictionResult | null;
   isPredictionStale: boolean;

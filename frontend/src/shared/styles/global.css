@@ -229,6 +229,20 @@ body {
     gap: 5px;
 }
 
+.workspace-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 8px 0 14px;
+}
+
+.workspace-heading .card-title { margin: 0; }
+.comparison-placeholder { color: var(--gray-700); }
+.comparison-note { padding: 10px 12px; border-left: 3px solid var(--blue-500); background: var(--blue-50); color: var(--blue-900); }
+.apartment-color-key { display: inline-block; width: 11px; height: 11px; margin-right: 8px; border-radius: 50%; vertical-align: -1px; }
+.comparison-forecast-table { width: max-content; min-width: 100%; }
+
 .result-tabs {
     display: flex;
     gap: 8px;
@@ -443,6 +457,10 @@ body {
 .forecast-table tbody tr:nth-child(even) { background: var(--blue-50); }
 .forecast-table tbody tr:hover { background: var(--blue-100); }
 .forecast-table tbody tr:first-child td { font-weight: 700; color: var(--blue-800); }
+
+@media (max-width: 560px) {
+    .workspace-heading { align-items: flex-start; flex-direction: column; }
+}
 
 .chart-wrap {
     position: relative;

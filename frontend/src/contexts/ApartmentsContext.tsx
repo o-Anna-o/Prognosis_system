@@ -18,8 +18,12 @@ type ApartmentsAction =
   | { type: "apartment/removed"; id: string }
   | { type: "apartment/parametersChanged"; id: string; patch: ApartmentParameterPatch }
   | { type: "apartment/predictionSet"; id: string; prediction: PredictionResult }
+  | { type: "apartments/predictionsSet"; predictions: { id: string; prediction: PredictionResult }[] }
   | { type: "apartment/predictionStarted"; id: string }
   | { type: "apartment/predictionFailed"; id: string; error: string }
+  | { type: "apartment/errorCleared"; id: string }
+  | { type: "apartment/predictionCancelled"; id: string }
+  | { type: "apartments/reset" }
   | { type: "apartment/collapseToggled"; id: string }
   | { type: "apartments/collapsedSet"; collapsed: boolean }
   | { type: "apartment/activated"; id: string };
@@ -33,7 +37,11 @@ interface ApartmentsActionsContextValue {
   removeApartment: (id: string) => void;
   updateApartmentParameters: (id: string, patch: ApartmentParameterPatch) => void;
   setApartmentPrediction: (id: string, prediction: PredictionResult) => void;
+  setApartmentPredictions: (predictions: { id: string; prediction: PredictionResult }[]) => void;
+  startApartmentPrediction: (id: string) => void;
+  cancelApartmentPrediction: (id: string) => void;
   setApartmentError: (id: string, error: string | null) => void;
+  resetApartments: () => void;
   toggleApartmentCollapsed: (id: string) => void;
   setApartmentsCollapsed: (collapsed: boolean) => void;
   setActiveApartment: (id: string) => void;
@@ -57,7 +65,7 @@ function createEmptyParameters(): ApartmentInput {
     year_build: "",
     floor: "",
     area: "",
-    n_years: "5",
+    n_years: "",
   };
 }
 
@@ -67,6 +75,7 @@ function apartmentsReducer(state: ApartmentsState, action: ApartmentsAction): Ap
       const apartment: ApartmentState = {
         id: action.id,
         order: state.nextOrder,
+        formRevision: 0,
         parameters: action.parameters,
         prediction: null,
         isPredictionStale: false,
@@ -82,9 +91,7 @@ function apartmentsReducer(state: ApartmentsState, action: ApartmentsAction): Ap
       };
     }
     case "apartment/removed": {
-      const apartments = state.apartments
-        .filter((apartment) => apartment.id !== action.id)
-        .map((apartment, index) => ({ ...apartment, order: index + 1 }));
+      const apartments = state.apartments.filter((apartment) => apartment.id !== action.id);
       const activeApartmentId =
         state.activeApartmentId === action.id
           ? (apartments[0]?.id ?? null)
@@ -92,7 +99,7 @@ function apartmentsReducer(state: ApartmentsState, action: ApartmentsAction): Ap
 
       return apartments.length === state.apartments.length
         ? state
-        : { ...state, apartments, activeApartmentId, nextOrder: apartments.length + 1 };
+        : { ...state, apartments, activeApartmentId };
     }
     case "apartment/parametersChanged": {
       let changed = false;
@@ -123,10 +130,44 @@ function apartmentsReducer(state: ApartmentsState, action: ApartmentsAction): Ap
             : apartment,
         ),
       };
+    case "apartments/predictionsSet": {
+      const predictions = new Map(action.predictions.map(({ id, prediction }) => [id, prediction]));
+      return {
+        ...state,
+        apartments: state.apartments.map((apartment) => {
+          const prediction = predictions.get(apartment.id);
+          return prediction
+            ? { ...apartment, prediction, isPredictionStale: false, isCalculating: false, error: null }
+            : apartment;
+        }),
+      };
+    }
     case "apartment/predictionStarted":
       return { ...state, apartments: state.apartments.map((apartment) => apartment.id === action.id ? { ...apartment, isCalculating: true, error: null } : apartment) };
     case "apartment/predictionFailed":
       return { ...state, apartments: state.apartments.map((apartment) => apartment.id === action.id ? { ...apartment, isCalculating: false, error: action.error } : apartment) };
+    case "apartment/errorCleared":
+      return { ...state, apartments: state.apartments.map((apartment) => apartment.id === action.id ? { ...apartment, error: null } : apartment) };
+    case "apartment/predictionCancelled":
+      return { ...state, apartments: state.apartments.map((apartment) => apartment.id === action.id ? { ...apartment, isCalculating: false, error: null } : apartment) };
+    case "apartments/reset": {
+      const first = state.apartments[0];
+      if (!first) return initialState;
+      return {
+        apartments: [{
+          ...first,
+          order: 1,
+          formRevision: first.formRevision + 1,
+          parameters: createEmptyParameters(),
+          prediction: null,
+          isPredictionStale: false,
+          isCalculating: false,
+          error: null,
+        }],
+        activeApartmentId: first.id,
+        nextOrder: 2,
+      };
+    }
     case "apartment/collapseToggled":
       return {
         ...state,
@@ -175,9 +216,17 @@ export function ApartmentsProvider({ children }: ApartmentsProviderProps) {
       dispatch({ type: "apartment/predictionSet", id, prediction }),
     [],
   );
+  const setApartmentPredictions = useCallback(
+    (predictions: { id: string; prediction: PredictionResult }[]) =>
+      dispatch({ type: "apartments/predictionsSet", predictions }),
+    [],
+  );
+  const startApartmentPrediction = useCallback((id: string) => dispatch({ type: "apartment/predictionStarted", id }), []);
+  const cancelApartmentPrediction = useCallback((id: string) => dispatch({ type: "apartment/predictionCancelled", id }), []);
   const setApartmentError = useCallback((id: string, error: string | null) => {
-    dispatch(error ? { type: "apartment/predictionFailed", id, error } : { type: "apartment/predictionStarted", id });
+    dispatch(error ? { type: "apartment/predictionFailed", id, error } : { type: "apartment/errorCleared", id });
   }, []);
+  const resetApartments = useCallback(() => dispatch({ type: "apartments/reset" }), []);
   const toggleApartmentCollapsed = useCallback(
     (id: string) => dispatch({ type: "apartment/collapseToggled", id }),
     [],
@@ -201,7 +250,11 @@ export function ApartmentsProvider({ children }: ApartmentsProviderProps) {
       removeApartment,
       updateApartmentParameters,
       setApartmentPrediction,
+      setApartmentPredictions,
+      startApartmentPrediction,
+      cancelApartmentPrediction,
       setApartmentError,
+      resetApartments,
       toggleApartmentCollapsed,
       setApartmentsCollapsed,
       setActiveApartment,
@@ -211,7 +264,11 @@ export function ApartmentsProvider({ children }: ApartmentsProviderProps) {
       removeApartment,
       updateApartmentParameters,
       setApartmentPrediction,
+      setApartmentPredictions,
+      startApartmentPrediction,
+      cancelApartmentPrediction,
       setApartmentError,
+      resetApartments,
       toggleApartmentCollapsed,
       setApartmentsCollapsed,
       setActiveApartment,

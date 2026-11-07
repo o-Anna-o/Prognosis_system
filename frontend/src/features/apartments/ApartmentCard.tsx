@@ -65,6 +65,8 @@ export function ApartmentCard({ id, order, apartmentCount, isFirstApartment, tit
   return (
     <article id={`apartment-card-${order}`} className={`card form-card apartment-card ${styles.card} ${collapsed ? "collapsed" : ""}`} aria-labelledby={`${id}-title`}>
       <h2 className={`card-title ${styles.title}`} id={`${id}-title`}>{title}</h2>
+      {predictionStale && <p role="status">Параметры изменены — прогноз устарел. Рассчитайте его снова.</p>}
+      {error && <p className="error-msg" role="alert">{error}</p>}
       {!collapsed && <>
       <div id={`${id}-fields`} className="form-grid">
         <div className="form-group">
@@ -120,13 +122,11 @@ export function ApartmentCard({ id, order, apartmentCount, isFirstApartment, tit
       </div>
       <div className="form-actions">
         {apartmentCount === 1 && <button type="button" className="btn btn-primary" disabled={calculating} onClick={() => onPredict(id)}>{calculating ? "Расчёт…" : "Рассчитать прогноз"}</button>}
-        <button type="button" className="btn btn-secondary" onClick={() => onParameterChange(id, { region: "", district: "", street: "", wall_material: "", year_build: "", floor: "", area: "", n_years: "5" })}>Сбросить</button>
+        <button type="button" className="btn btn-secondary" disabled={calculating} onClick={() => onParameterChange(id, { region: "", district: "", street: "", wall_material: "", year_build: "", floor: "", area: "", n_years: "" })}>Сбросить</button>
         {isFirstApartment && <button type="button" className="btn btn-secondary" disabled={calculating} onClick={onAdd}>+ Добавить квартиру</button>}
         {apartmentCount > 1 && <button type="button" className="apartment-remove-btn" aria-label={`Удалить квартиру №${order}`} title="Удалить квартиру" disabled={calculating} onClick={() => onRemove(id)}>×</button>}
         <button type="button" id={order === 1 ? "toggle-params-btn" : `toggle-params-btn-${order}`} className="collapse-btn" aria-expanded aria-label="Свернуть параметры квартиры" onClick={() => onToggleCollapsed(id)}><CollapseArrowIcon /></button>
       </div>
-      {predictionStale && <p role="status">Параметры изменены — прогноз устарел. Рассчитайте его снова.</p>}
-      {error && <p className="error-msg" role="alert">{error}</p>}
       </>}
       {collapsed && <button type="button" id={order === 1 ? "toggle-params-btn" : `toggle-params-btn-${order}`} className="collapse-btn" aria-expanded={false} aria-label="Развернуть параметры квартиры" onClick={() => onToggleCollapsed(id)}><CollapseArrowIcon /></button>}
     </article>

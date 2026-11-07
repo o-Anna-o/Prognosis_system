@@ -37,6 +37,9 @@ export interface PredictionResult {
   infl_first: number | null;
   infl_last: number | null;
   forecast: ForecastPoint[];
+  /** Точные аналитические значения; возвращаются batch API, одиночный контракт не меняется. */
+  base_price_exact?: number;
+  forecast_exact?: { year: number; price_mln: number; inflation_pct: number }[];
 }
 
 /** Справочник из GET /api/reference. */
@@ -54,17 +57,18 @@ export interface ReferenceData {
 }
 
 export interface BatchApartmentInput extends ApartmentInput {
-  client_id?: string | null;
+  client_id: string;
 }
 
 export interface BatchPredictionItem {
-  client_id: string | null;
+  client_id: string;
   prediction: PredictionResult;
 }
 
 export interface BatchComparisonForecast {
-  client_id: string | null;
+  client_id: string;
   forecast: ForecastPoint[];
+  forecast_exact: { year: number; price_mln: number; inflation_pct: number }[];
 }
 
 export interface BatchPredictionResult {
