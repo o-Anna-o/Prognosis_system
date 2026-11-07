@@ -61,19 +61,43 @@ async function loadReference(attempt = 0) {
     const data = await res.json();
     referenceData = data;
 
-    data.regions.forEach((r) => {
-        const opt = document.createElement("option");
-        opt.value = r;
-        opt.textContent = r;
-        regionSelect.appendChild(opt);
-    });
+    const cards = Array.from(document.querySelectorAll(".apartment-card"));
+    if (!cards.length && regionSelect) cards.push(regionSelect.closest("form"));
 
-    const wallSelect = document.getElementById("wall_material");
-    data.wall_materials.forEach((w) => {
-        const opt = document.createElement("option");
-        opt.value = w;
-        opt.textContent = w;
-        wallSelect.appendChild(opt);
+    cards.filter(Boolean).forEach((card) => {
+        // Старые поля формы находятся по фиксированным ID; для остальных карточек
+        // используем локальные name, чтобы каждое поле оставалось независимым.
+        const cardRegionSelect = card.querySelector('[name="region"]') ||
+            (card.id === "region" ? card : card.querySelector("#region"));
+        const cardDistrictSelect = card.querySelector('[name="district"]') || card.querySelector("#district");
+        const cardStreetInput = card.querySelector('[name="street"]') || card.querySelector("#street");
+        const cardWallSelect = card.querySelector('[name="wall_material"]') || card.querySelector("#wall_material");
+        if (!cardRegionSelect || !cardDistrictSelect || !cardStreetInput || !cardWallSelect) return;
+
+        data.regions.forEach((region) => {
+            const option = document.createElement("option");
+            option.value = region;
+            option.textContent = region;
+            cardRegionSelect.appendChild(option);
+        });
+
+        data.wall_materials.forEach((material) => {
+            const option = document.createElement("option");
+            option.value = material;
+            option.textContent = material;
+            cardWallSelect.appendChild(option);
+        });
+
+        fillDistrictList("", cardDistrictSelect);
+        cardRegionSelect.addEventListener("change", () => {
+            cardDistrictSelect.value = "";
+            cardStreetInput.value = "";
+            fillDistrictList(cardRegionSelect.value, cardDistrictSelect);
+        });
+        cardDistrictSelect.addEventListener("change", () => {
+            // При смене района улицу нужно ввести заново.
+            cardStreetInput.value = "";
+        });
     });
 }
 
@@ -82,15 +106,15 @@ const regionSelect = document.getElementById("region");
 const districtSelect = document.getElementById("district");
 const streetInput = document.getElementById("street");
 
-function fillDistrictList(region) {
+function fillDistrictList(region, targetSelect = districtSelect) {
     // Сохраняем выбранный район, чтобы не сбрасывать его при обновлении списка.
-    const previous = districtSelect.value;
-    districtSelect.innerHTML = "";
+    const previous = targetSelect.value;
+    targetSelect.innerHTML = "";
 
     const placeholder = document.createElement("option");
     placeholder.value = "";
     placeholder.textContent = " выберите район ";
-    districtSelect.appendChild(placeholder);
+    targetSelect.appendChild(placeholder);
 
     if (!region || !referenceData) return;
     const districts = (referenceData.region_districts || {})[region] || [];
@@ -98,24 +122,13 @@ function fillDistrictList(region) {
         const opt = document.createElement("option");
         opt.value = d;
         opt.textContent = d;
-        districtSelect.appendChild(opt);
+        targetSelect.appendChild(opt);
     });
 
     if (districts.includes(previous)) {
-        districtSelect.value = previous;
+        targetSelect.value = previous;
     }
 }
-
-regionSelect.addEventListener("change", () => {
-    districtSelect.value = "";
-    streetInput.value = "";
-    fillDistrictList(regionSelect.value);
-});
-
-districtSelect.addEventListener("change", () => {
-    // При смене района улицу нужно ввести заново.
-    streetInput.value = "";
-});
 
 // Валидация 
 function setError(fieldName, message) {
