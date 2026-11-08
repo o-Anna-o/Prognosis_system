@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
@@ -30,11 +30,8 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "core.apps.CoreConfig",
-    "apps.apartments.apps.ApartmentsConfig",
     "apps.forecasting.apps.ForecastingConfig",
-    "apps.comparison.apps.ComparisonConfig",
     "apps.assistant.apps.AssistantConfig",
-    "apps.reference_data.apps.ReferenceDataConfig",
 ]
 
 MIDDLEWARE = [
@@ -77,13 +74,20 @@ def _postgres_database() -> dict[str, object]:
     if parsed.scheme not in {"postgres", "postgresql"}:
         raise ImproperlyConfigured("DATABASE_URL must use PostgreSQL.")
 
+    database_name = unquote(parsed.path.lstrip("/"))
+    if not database_name:
+        raise ImproperlyConfigured("DATABASE_URL must include a PostgreSQL database name.")
+
+    options = dict(parse_qsl(parsed.query, keep_blank_values=True))
+
     return {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": unquote(parsed.path.lstrip("/")),
+        "NAME": database_name,
         "USER": unquote(parsed.username or ""),
         "PASSWORD": unquote(parsed.password or ""),
-        "HOST": parsed.hostname or "localhost",
+        "HOST": parsed.hostname or "",
         "PORT": str(parsed.port or 5432),
+        "OPTIONS": options,
         "CONN_MAX_AGE": 60,
     }
 

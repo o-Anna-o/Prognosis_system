@@ -363,38 +363,15 @@ def predict_batch():
 
 
 def _predict_for_agent(payload: dict) -> dict:
-    """
-    Использует существующий API прогноза внутри Flask,
-    не обращаясь к самой себе по HTTP.
-    """
-    with app.test_client() as client:
-        response = client.post(
-            "/api/predict",
-            json=payload,
-        )
-
-        try:
-            result = response.get_json()
-        except Exception:
-            result = None
-
-        if response.status_code >= 400:
-            # Не передаём агенту внутренние подробности ошибки.
-            return {
-                "ok": False,
-                "error": (
-                    "Прогноз не выполнен. "
-                    "Проверьте параметры квартиры."
-                ),
-            }
-
-        if not isinstance(result, dict):
-            return {
-                "ok": False,
-                "error": "Не удалось получить результат прогноза.",
-            }
-
-        return result
+    """Call the shared prediction builder without routing through Flask."""
+    with _state_lock:
+        model = MODEL if MODEL_READY else None
+    if model is None:
+        return {"ok": False, "error": "Прогноз сейчас недоступен."}
+    try:
+        return _build_prediction(model, payload)
+    except _PayloadValidationError:
+        return {"ok": False, "error": "Проверьте параметры квартиры."}
 
 
 configure_predictor(_predict_for_agent)
