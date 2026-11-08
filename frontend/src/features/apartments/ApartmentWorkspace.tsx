@@ -5,7 +5,7 @@ import { useApartmentsActions, useApartmentsState } from "../../contexts/Apartme
 import { ApartmentCard } from "./ApartmentCard";
 import { validateApartment } from "./validation";
 import { apartmentVisual, compareApartments } from "./comparison";
-import type { PredictionResult } from "../../shared/api/types";
+import type { ApartmentInput, PredictionResult } from "../../shared/api/types";
 
 declare global {
   interface Window { Chart?: new (context: CanvasRenderingContext2D, config: ChartConfig) => { destroy: () => void }; }
@@ -132,7 +132,7 @@ function IndividualChart({ result, title, order }: { result: PredictionResult; t
 
 export function ApartmentWorkspace() {
   const { apartments } = useApartmentsState();
-  const { addApartment, removeApartment, updateApartmentParameters, setApartmentPrediction, setApartmentPredictions, setApartmentError, startApartmentPrediction, cancelApartmentPrediction, resetApartments, toggleApartmentCollapsed, setApartmentsCollapsed } = useApartmentsActions();
+  const { addApartment, removeApartment, updateApartmentParameters, setApartmentPrediction, clearApartmentPrediction, setApartmentPredictions, setApartmentError, startApartmentPrediction, cancelApartmentPrediction, resetApartments, toggleApartmentCollapsed, setApartmentsCollapsed } = useApartmentsActions();
   const referenceQuery = useQuery({
     queryKey: ["reference"],
     queryFn: ({ signal }) => getReference(signal),
@@ -146,6 +146,8 @@ export function ApartmentWorkspace() {
   apartmentsRef.current = apartments;
   const requestVersion = useRef(0);
   const pendingIds = useRef<string[]>([]);
+  const pendingAssistantPrediction = useRef<{ id: string; signature: string } | null>(null);
+  const predictRef = useRef<(id?: string) => Promise<void>>(async () => undefined);
   const [activeResultId, setActiveResultId] = useState<string | "comparison">("comparison");
   const [comparisonSnapshot, setComparisonSnapshot] = useState<string | null>(null);
 
@@ -262,6 +264,69 @@ export function ApartmentWorkspace() {
       }
     }
   };
+  predictRef.current = predict;
+
+  useEffect(() => {
+    const pending = pendingAssistantPrediction.current;
+    if (!pending) return;
+    const apartment = apartments.find((item) => item.id === pending.id);
+    if (!apartment || parameterSignature([apartment]) !== pending.signature) return;
+    pendingAssistantPrediction.current = null;
+    void predictRef.current(pending.id);
+  }, [apartments]);
+
+  useEffect(() => {
+    const assistantFieldNames: Record<string, string> = { region: "административный округ", district: "район", street: "улица", wall_material: "материал стен", year_build: "год постройки", floor: "этаж", area: "площадь", n_years: "горизонт прогноза" };
+    const handleAssistantCalculation: EventListener = (event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (detail === null || typeof detail !== "object") {
+        window.dispatchEvent(new CustomEvent("prognosis:assistant-error", { detail: "Агент передал некорректные параметры квартиры." }));
+        return;
+      }
+      const data = detail as Record<string, unknown>;
+      const first = apartmentsRef.current[0];
+      const reference = referenceQuery.data;
+      if (!first || !reference) {
+        window.dispatchEvent(new CustomEvent("prognosis:assistant-error", { detail: "Справочники ещё загружаются. Попробуйте повторить запрос." }));
+        return;
+      }
+      const textValue = (key: string) => data[key] === undefined || data[key] === null ? "" : String(data[key]);
+      const candidate: ApartmentInput = {
+        region: textValue("region"),
+        district: textValue("district"),
+        street: textValue("street"),
+        wall_material: textValue("wall_material"),
+        year_build: textValue("year_build"),
+        floor: textValue("floor"),
+        area: textValue("area"),
+        n_years: apartmentsRef.current.length > 1
+          ? String(first.parameters.n_years ?? "")
+          : textValue("n_years"),
+      };
+      const errors = validateApartment(candidate, reference);
+      const firstError = Object.entries(errors)[0];
+      if (firstError) {
+        const message = `Параметр «${assistantFieldNames[firstError[0]] ?? firstError[0]}»: ${firstError[1]}`;
+        window.dispatchEvent(new CustomEvent("prognosis:assistant-error", { detail: message }));
+        return;
+      }
+
+      const signature = parameterSignature([{ id: first.id, parameters: candidate }]);
+      const unchanged = parameterSignature([first]) === signature;
+      invalidatePending();
+      window.dispatchEvent(new Event("prognosis:show-forecast"));
+      setActiveResultId(first.id);
+      clearApartmentPrediction(first.id);
+      if (unchanged) {
+        void predictRef.current(first.id);
+      } else {
+        pendingAssistantPrediction.current = { id: first.id, signature };
+        updateApartmentParameters(first.id, candidate);
+      }
+    };
+    window.addEventListener("prognosis:assistant-calculation", handleAssistantCalculation);
+    return () => window.removeEventListener("prognosis:assistant-calculation", handleAssistantCalculation);
+  }, [clearApartmentPrediction, referenceQuery.data, updateApartmentParameters]);
 
   if (!referenceQuery.data) return <section className="card" role="status">Модель и справочники загружаются…</section>;
   return <>

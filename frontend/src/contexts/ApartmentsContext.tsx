@@ -18,6 +18,7 @@ type ApartmentsAction =
   | { type: "apartment/removed"; id: string }
   | { type: "apartment/parametersChanged"; id: string; patch: ApartmentParameterPatch }
   | { type: "apartment/predictionSet"; id: string; prediction: PredictionResult }
+  | { type: "apartment/predictionCleared"; id: string }
   | { type: "apartments/predictionsSet"; predictions: { id: string; prediction: PredictionResult }[] }
   | { type: "apartment/predictionStarted"; id: string }
   | { type: "apartment/predictionFailed"; id: string; error: string }
@@ -37,6 +38,7 @@ interface ApartmentsActionsContextValue {
   removeApartment: (id: string) => void;
   updateApartmentParameters: (id: string, patch: ApartmentParameterPatch) => void;
   setApartmentPrediction: (id: string, prediction: PredictionResult) => void;
+  clearApartmentPrediction: (id: string) => void;
   setApartmentPredictions: (predictions: { id: string; prediction: PredictionResult }[]) => void;
   startApartmentPrediction: (id: string) => void;
   cancelApartmentPrediction: (id: string) => void;
@@ -130,6 +132,13 @@ function apartmentsReducer(state: ApartmentsState, action: ApartmentsAction): Ap
             : apartment,
         ),
       };
+    case "apartment/predictionCleared":
+      return {
+        ...state,
+        apartments: state.apartments.map((apartment) => apartment.id === action.id
+          ? { ...apartment, prediction: null, isPredictionStale: false, isCalculating: false, error: null }
+          : apartment),
+      };
     case "apartments/predictionsSet": {
       const predictions = new Map(action.predictions.map(({ id, prediction }) => [id, prediction]));
       return {
@@ -216,6 +225,7 @@ export function ApartmentsProvider({ children }: ApartmentsProviderProps) {
       dispatch({ type: "apartment/predictionSet", id, prediction }),
     [],
   );
+  const clearApartmentPrediction = useCallback((id: string) => dispatch({ type: "apartment/predictionCleared", id }), []);
   const setApartmentPredictions = useCallback(
     (predictions: { id: string; prediction: PredictionResult }[]) =>
       dispatch({ type: "apartments/predictionsSet", predictions }),
@@ -250,6 +260,7 @@ export function ApartmentsProvider({ children }: ApartmentsProviderProps) {
       removeApartment,
       updateApartmentParameters,
       setApartmentPrediction,
+      clearApartmentPrediction,
       setApartmentPredictions,
       startApartmentPrediction,
       cancelApartmentPrediction,
@@ -264,6 +275,7 @@ export function ApartmentsProvider({ children }: ApartmentsProviderProps) {
       removeApartment,
       updateApartmentParameters,
       setApartmentPrediction,
+      clearApartmentPrediction,
       setApartmentPredictions,
       startApartmentPrediction,
       cancelApartmentPrediction,

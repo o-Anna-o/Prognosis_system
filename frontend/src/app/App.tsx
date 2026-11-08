@@ -1,41 +1,10 @@
 import { useEffect } from "react";
 import { ApartmentWorkspace } from "../features/apartments/ApartmentWorkspace";
-
-let legacyUiPromise: Promise<void> | undefined;
-
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = src;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`Не удалось загрузить ${src}`));
-    document.body.appendChild(script);
-  });
-}
-
-function loadExistingUi(): Promise<void> {
-  if (!legacyUiPromise) {
-    legacyUiPromise = (async () => {
-      try {
-        await loadScript("https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js");
-        await loadScript(
-          "https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js",
-        );
-      } catch (error) {
-        console.error("Не удалось загрузить библиотеки графиков:", error);
-      }
-      await loadScript("/static/script.js");
-    })();
-  }
-
-  return legacyUiPromise;
-}
+import { initializeBrowserUi } from "./browserUi";
 
 export function App() {
   useEffect(() => {
-    void loadExistingUi().catch((error: unknown) => {
-      console.error("Не удалось подключить существующие сценарии интерфейса:", error);
-    });
+    return initializeBrowserUi();
   }, []);
 
   return (

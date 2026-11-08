@@ -3,6 +3,17 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        entryFileNames: "assets/prognosis.js",
+        chunkFileNames: "assets/chunk-[name].js",
+        assetFileNames: (asset) => asset.name?.endsWith(".css")
+          ? "assets/prognosis.css"
+          : "assets/[name][extname]",
+      },
+    },
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,

@@ -139,10 +139,15 @@ class _PayloadValidationError(ValueError):
     """Ошибка пользовательских параметров, возвращаемая API как HTTP 400."""
 
 
-def _build_prediction(model: m.PrognosisModel, payload: dict | list[dict]) -> dict | list[dict]:
+def _build_prediction(
+    model: m.PrognosisModel,
+    payload: dict | list[dict],
+    *,
+    include_exact: bool = False,
+) -> dict | list[dict]:
     """Получает и формирует прогноз для одной квартиры или списка квартир."""
     if isinstance(payload, list):
-        return [_build_prediction(model, apartment) for apartment in payload]
+        return [_build_prediction(model, apartment, include_exact=include_exact) for apartment in payload]
     if not isinstance(payload, dict):
         raise _PayloadValidationError("Некорректные параметры квартиры.")
 
@@ -153,7 +158,7 @@ def _build_prediction(model: m.PrognosisModel, payload: dict | list[dict]) -> di
     n_years = apartment.pop("n_years")
     result = model.forecast(apartment, n_years)
 
-    return {
+    prediction = {
         "apartment": {
             "region": apartment["region"],
             "district": apartment["district"],
@@ -171,6 +176,10 @@ def _build_prediction(model: m.PrognosisModel, payload: dict | list[dict]) -> di
         "infl_last": result["infl_last"],
         "forecast": result["forecast"].to_dict(orient="records"),
     }
+    if include_exact:
+        prediction["base_price_exact"] = float(result["base_price"])
+        prediction["forecast_exact"] = result["forecast_exact"]
+    return prediction
 
 
 
@@ -178,7 +187,7 @@ def _build_prediction(model: m.PrognosisModel, payload: dict | list[dict]) -> di
 
 @app.route("/")
 def index():
-    """Отдаёт собранный React-интерфейс; оставляет legacy-шаблон как fallback."""
+    """Отдаёт собранный React-интерфейс или его HTML-shell для сборки."""
     if (FRONTEND_DIST / "index.html").is_file():
         return send_from_directory(FRONTEND_DIST, "index.html")
     return render_template("index.html")
@@ -271,6 +280,8 @@ def predict_batch():
         return jsonify({"error": "Ожидается непустой JSON-массив квартир."}), 400
 
     validated = []
+    seen_client_ids: set[str] = set()
+    common_horizon: int | None = None
     try:
         # Проверяем каждый объект до первого обращения к прогнозу.
         for index, item in enumerate(data, start=1):
@@ -278,6 +289,16 @@ def predict_batch():
                 raise _PayloadValidationError(
                     f"Квартира {index}, поле «объект»: ожидается JSON-объект."
                 )
+            client_id = item.get("client_id")
+            if not isinstance(client_id, str) or not client_id.strip():
+                raise _PayloadValidationError(
+                    f"Квартира {index}, поле «client_id»: требуется уникальный идентификатор."
+                )
+            if client_id in seen_client_ids:
+                raise _PayloadValidationError(
+                    f"Квартира {index}, поле «client_id»: идентификатор повторяется."
+                )
+            seen_client_ids.add(client_id)
             try:
                 apartment = _validate_payload(item)
             except ValueError as exc:
@@ -299,7 +320,13 @@ def predict_batch():
                 raise _PayloadValidationError(
                     f"Квартира {index}, поле «{field}»: {exc}"
                 ) from exc
-            validated.append((item.get("client_id"), apartment))
+            if common_horizon is None:
+                common_horizon = apartment["n_years"]
+            elif apartment["n_years"] != common_horizon:
+                raise _PayloadValidationError(
+                    f"Квартира {index}, поле «n_years»: горизонт должен совпадать у всех квартир."
+                )
+            validated.append((client_id, apartment))
     except _PayloadValidationError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -310,14 +337,14 @@ def predict_batch():
             prediction = _build_prediction(model, {
                 **apartment,
                 "wall_material": m.WALL_MATERIAL_NAMES[apartment["wall_material_code"]],
-            })
+            }, include_exact=True)
             results.append({"client_id": client_id, "prediction": prediction})
 
-        common_horizon = min(len(item["prediction"]["forecast"]) for item in results)
         comparison = [
             {
                 "client_id": item["client_id"],
-                "forecast": item["prediction"]["forecast"][:common_horizon],
+                "forecast": item["prediction"]["forecast"],
+                "forecast_exact": item["prediction"]["forecast_exact"],
             }
             for item in results
         ]

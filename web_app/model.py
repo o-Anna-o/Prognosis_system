@@ -516,6 +516,10 @@ class PrognosisModel:
 
         return {
             "forecast": forecast_df,
+            "forecast_exact": [
+                {"year": int(year), "price_mln": float(price / 1e6), "inflation_pct": float(inflation)}
+                for year, price, inflation in zip(years, prices, [0.0] + list(infl_values))
+            ],
             "base_price": base_price,
             "coef_region": coef_region,
             "base_year": self.base_year,
