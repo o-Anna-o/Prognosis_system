@@ -120,25 +120,42 @@ def _matches(text: str, candidate: str) -> bool:
 
 
 def _street_name_variants(street: str) -> set[str]:
-    """Return common Russian case forms for street names from the reference."""
+    """Return nominative and common case forms of referenced street names."""
     normalized = _normalize(street)
-    variants = {normalized}
+    street_types = {
+        "\u0443\u043b\u0438\u0446\u0430", "\u0443\u043b.", "\u043f\u0440\u043e\u0441\u043f\u0435\u043a\u0442",
+        "\u043f\u0440\u043e\u0435\u0437\u0434", "\u043f\u0435\u0440\u0435\u0443\u043b\u043e\u043a", "\u0431\u0443\u043b\u044c\u0432\u0430\u0440",
+        "\u043d\u0430\u0431\u0435\u0440\u0435\u0436\u043d\u0430\u044f", "\u0448\u043e\u0441\u0441\u0435",
+    }
+    bases = {normalized}
     words = normalized.split()
-    if words:
-        last = words[-1]
-        last_forms = {last}
-        for ending, replacement in (("ская", "ской"), ("цкая", "цкой"), ("ая", "ой"), ("яя", "ей")):
-            if last.endswith(ending):
-                last_forms.add(last[:-len(ending)] + replacement)
-                break
-        first_forms = {words[0]}
-        if len(words) > 1 and re.fullmatch(r"\d+-я", words[0]):
-            first_forms.add(words[0][:-1] + "й")
-        for first in first_forms:
-            for last_form in last_forms:
-                variants.add(" ".join([first, *words[1:-1], last_form]))
-    return variants
+    if words and words[0] in street_types:
+        bases.add(" ".join(words[1:]))
+    if words and words[-1] in street_types:
+        bases.add(" ".join(words[:-1]))
 
+    variants = set(bases)
+    endings = (
+        ("\u0441\u043a\u0430\u044f", "\u0441\u043a\u043e\u0439"),
+        ("\u0446\u043a\u0430\u044f", "\u0446\u043a\u043e\u0439"),
+        ("\u0430\u044f", "\u043e\u0439"),
+        ("\u044f\u044f", "\u0435\u0439"),
+    )
+    for base in bases:
+        parts = base.split()
+        forms = [set([part]) for part in parts]
+        for index, part in enumerate(parts):
+            for ending, replacement in endings:
+                if part.endswith(ending):
+                    forms[index].add(part[:-len(ending)] + replacement)
+                    break
+            if len(parts) > 1 and index == 0 and re.fullmatch(r"\d+-\u044f", part):
+                forms[index].add(part[:-1] + "\u0439")
+        combinations = [""]
+        for options in forms:
+            combinations = [f"{prefix} {option}".strip() for prefix in combinations for option in options]
+        variants.update(combinations)
+    return variants
 
 def _extract_street_phrase(text: str) -> str:
     """Извлекает улицу после слов «улица», «проспект», «переулок» и т. п.
@@ -298,7 +315,7 @@ def _extract_parameters(message: str) -> dict[str, Any]:
     # floor — «этаж 7», «7 этаж», «на 7-м этаже»
     m = re.search(r"этаж(?:е)?\s*[:\s-]*(\d{1,2})", text)
     if not m:
-        m = re.search(r"(\d{1,2})\s*(?:-?[а-я]+)?\s*этаж(?!\w)", text)
+        m = re.search(r"(\d{1,2})\s*(?:-?[а-я]+)?\s*этаж(?:е)?(?!\w)", text)
     if not m:
         floor_words = {
             "первом": 1, "первый": 1, "первом этаже": 1,
@@ -366,7 +383,7 @@ def _extract_parameters(message: str) -> dict[str, Any]:
         for alias, region in sorted(
             aliases.items(), key=lambda item: len(item[0]), reverse=True
         ):
-            if _normalize(alias) in text:
+            if _matches(text, _normalize(alias)):
                 best_region = region
                 break
     if best_region:
@@ -1040,11 +1057,10 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
             item.update(shared)
     if matches:
         prefix = text[:matches[0].start()]
-        if any(word in _normalize(prefix) for word in ("обе", "все", "кажд", "у каждой", "у всех")):
-            shared = _extract_parameters(prefix)
-            for item in apartments:
-                for key, value in shared.items():
-                    item.setdefault(key, value)
+        shared = _extract_parameters(prefix)
+        for item in apartments:
+            for key, value in shared.items():
+                item.setdefault(key, value)
         for position, match in enumerate(matches):
             word = _normalize(match.group(1))
             index = 0 if word.startswith(("одна", "одной")) else 1 if word.startswith(("другая", "другой")) else next((idx for prefix, idx in _APARTMENT_ORDINALS.items() if word.startswith(prefix)), None)
