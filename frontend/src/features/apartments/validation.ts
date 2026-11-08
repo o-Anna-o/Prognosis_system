@@ -33,7 +33,7 @@ export function validateApartment(
 
   const area = numberValue(parameters.area);
   if (area === null) errors.area = "Площадь должна быть числом.";
-  else if (area < 1) errors.area = "Площадь должна быть не меньше 1.";
+  else if (area < 25) errors.area = "Площадь квартиры не может быть меньше 25 м².";
 
   const year = numberValue(parameters.year_build);
   if (year === null) errors.year_build = "Год постройки должен быть числом.";

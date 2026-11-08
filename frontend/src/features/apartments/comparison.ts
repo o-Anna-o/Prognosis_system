@@ -21,7 +21,7 @@ export const apartmentColors = [
   "#7B2CBF", "#9D4EDD", "#6B21A8", "#A855F7",
 ];
 
-export const apartmentMarkers = ["circle", "rect", "triangle", "rectRot", "cross", "star", "line"] as const;
+export const apartmentMarkers = ["circle"] as const;
 
 export function apartmentVisual(order: number) {
   const index = Math.max(0, order - 1);
@@ -60,20 +60,20 @@ export function compareApartments(items: ComparableApartment[]): {
     if (startPrice === undefined || endPrice === undefined || startPrice <= 0) return [];
     return [{ ...item, startPrice, endPrice, change: endPrice - startPrice, growth: (endPrice - startPrice) / startPrice * 100 }];
   });
-  const ranked = [...eligible].sort((a, b) => b.growth - a.growth);
+  const ranked = [...eligible].sort((a, b) => b.change - a.change);
   for (let start = 0; start < ranked.length;) {
     let end = start + 1;
-    while (end < ranked.length && growthsEqual(ranked[start]!.growth, ranked[end]!.growth)) end += 1;
+    while (end < ranked.length && growthsEqual(ranked[start]!.change, ranked[end]!.change)) end += 1;
     ranked.splice(start, end - start, ...ranked.slice(start, end).sort((a, b) => a.order - b.order));
     start = end;
   }
   let place = 0;
-  let previousGrowth: number | undefined;
+  let previousChange: number | undefined;
   const placeById = new Map<string, number>();
   ranked.forEach((row, index) => {
-    if (previousGrowth === undefined || !growthsEqual(row.growth, previousGrowth)) place = index + 1;
+    if (previousChange === undefined || !growthsEqual(row.change, previousChange)) place = index + 1;
     placeById.set(row.id, place);
-    previousGrowth = row.growth;
+    previousChange = row.change;
   });
   return {
     years,

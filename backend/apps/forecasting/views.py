@@ -56,6 +56,7 @@ def predict_batch(request):
 
     validated: list[tuple[str, dict]] = []
     seen_ids: set[str] = set()
+    seen_apartments: set[tuple] = set()
     horizon: int | None = None
     try:
         for index, item in enumerate(data, start=1):
@@ -68,6 +69,19 @@ def predict_batch(request):
                 raise ValueError(f"Квартира {index}, поле «client_id»: идентификатор повторяется.")
             seen_ids.add(client_id)
             apartment = services.validate_payload(item)
+            identity = (
+                apartment["region"].strip().casefold(),
+                apartment["district"].strip().casefold(),
+                apartment["street"].strip().casefold(),
+                apartment["wall_material_code"],
+                apartment["year_build"], apartment["floor"], apartment["area"],
+            )
+            if identity in seen_apartments:
+                return Response(
+                    {"error": "Параметры квартир совпадают, исправьте или удалите квартиру"},
+                    status=400,
+                )
+            seen_apartments.add(identity)
             if horizon is None:
                 horizon = apartment["n_years"]
             elif apartment["n_years"] != horizon:

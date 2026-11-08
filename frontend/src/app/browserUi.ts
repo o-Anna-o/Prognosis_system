@@ -226,7 +226,12 @@ function initializeAssistant(): () => void {
       const response = await fetch("/api/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, history: historyForRequest, conversation_id: conversationId }),
+        body: JSON.stringify({
+          message,
+          history: historyForRequest,
+          conversation_id: conversationId,
+          prediction_context: sessionStorage.getItem("prognosis-assistant-result-context"),
+        }),
         signal: controller.signal,
       });
       const responseText = await response.text();
@@ -243,7 +248,7 @@ function initializeAssistant(): () => void {
         sessionStorage.setItem(conversationStorageKey, conversationId);
       }
       const answer = data.answer;
-      if (typeof answer !== "string" || !answer.trim()) throw new Error("ИИ-помощник вернул пустой ответ.");
+      if (typeof answer !== "string" || !answer.trim()) throw new Error("ИИ-агент вернул пустой ответ.");
 
       let visibleAnswer = answer;
       const commandMatch = visibleAnswer.match(/\[\[CALCULATE_JSON\]\]([\s\S]*?)\[\[\/CALCULATE_JSON\]\]/);
@@ -265,7 +270,7 @@ function initializeAssistant(): () => void {
       history = history.slice(-20);
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
-      showError(caught instanceof Error ? caught.message : "Ошибка соединения с ИИ-помощником.");
+      showError(caught instanceof Error ? caught.message : "Ошибка соединения с ИИ-агентом.");
     } finally {
       controller = null;
       assistantSend.disabled = false;
@@ -287,7 +292,7 @@ function initializeAssistant(): () => void {
     history = [];
     assistantMessages.replaceChildren();
     hideError();
-    addMessage("assistant", "Приветствую! Я — ИИ-помощник. Задайте вопрос о прогнозировании или укажите параметры квартиры для расчёта.");
+    addMessage("assistant", "Приветствую! Я — ИИ-агент. Задайте вопрос о прогнозировании или укажите параметры квартиры для расчёта.");
   };
 
   form.addEventListener("submit", submitHandler);

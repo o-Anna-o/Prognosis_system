@@ -31,16 +31,16 @@ export function App() {
           Закономерности цен
         </button>
         <button type="button" className="tab-btn" data-tab="assistant">
-          ИИ-помощник
+          ИИ-агент
         </button>
       </nav>
 
       <main className="container">
         <div className="main-layout">
-          <aside id="tab-assistant" className="assistant-panel" aria-label="Чат с ИИ-помощником">
+          <aside id="tab-assistant" className="assistant-panel" aria-label="Чат с ИИ-агентом">
             <section className="card assistant-card">
               <div className="assistant-heading">
-                <h2 className="card-title">ИИ-помощник</h2>
+                <h2 className="card-title">ИИ-агент</h2>
                 <div className="assistant-heading-actions">
                   <button type="button" id="assistant-clear" className="btn btn-secondary">
                     Очистить чат
@@ -62,7 +62,7 @@ export function App() {
                 className="assistant-messages"
                 role="log"
                 aria-live="polite"
-                aria-label="Переписка с ИИ-помощником"
+                aria-label="Переписка с ИИ-агентом"
               >
                 <div className="assistant-message assistant-message-bot">
                   <div className="assistant-message-text">

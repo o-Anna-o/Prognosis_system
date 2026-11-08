@@ -131,7 +131,7 @@ def _validate_payload(data: Any) -> dict:
         "wall_material_code": prognosis_model.WALL_MATERIAL_CODES[wall_material],
         "year_build": _parse_int(data.get("year_build"), "Год постройки", minimum=1800),
         "floor": _parse_int(data.get("floor"), "Этаж", minimum=1),
-        "area": _parse_float(data.get("area"), "Площадь", minimum=1.0),
+        "area": _parse_float(data.get("area"), "Площадь квартиры, минимум 25 м²", minimum=25.0),
         "n_years": horizon,
     }
 

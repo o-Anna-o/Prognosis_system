@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -69,7 +70,16 @@ def chat(request):
             conversation_id = uuid4()
             init_storage(conversation_id)
             history = []
-        answer = agent_chat(message, history=history)
+        result_context = None
+        raw_result_context = payload.get("prediction_context")
+        if isinstance(raw_result_context, str) and len(raw_result_context) <= 12000:
+            try:
+                parsed_context = json.loads(raw_result_context)
+                if isinstance(parsed_context, dict):
+                    result_context = parsed_context
+            except json.JSONDecodeError:
+                pass
+        answer = agent_chat(message, history=history, result_context=result_context)
         save_turn(message, answer, conversation_id=conversation_id)
         return Response({"answer": answer, "conversation_id": str(conversation_id)})
     except ValueError as exc:

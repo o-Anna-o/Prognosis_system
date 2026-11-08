@@ -119,6 +119,27 @@ def _matches(text: str, candidate: str) -> bool:
     return False
 
 
+def _street_name_variants(street: str) -> set[str]:
+    """Return common Russian case forms for street names from the reference."""
+    normalized = _normalize(street)
+    variants = {normalized}
+    words = normalized.split()
+    if words:
+        last = words[-1]
+        last_forms = {last}
+        for ending, replacement in (("ская", "ской"), ("цкая", "цкой"), ("ая", "ой"), ("яя", "ей")):
+            if last.endswith(ending):
+                last_forms.add(last[:-len(ending)] + replacement)
+                break
+        first_forms = {words[0]}
+        if len(words) > 1 and re.fullmatch(r"\d+-я", words[0]):
+            first_forms.add(words[0][:-1] + "й")
+        for first in first_forms:
+            for last_form in last_forms:
+                variants.add(" ".join([first, *words[1:-1], last_form]))
+    return variants
+
+
 def _extract_street_phrase(text: str) -> str:
     """Извлекает улицу после слов «улица», «проспект», «переулок» и т. п.
 
@@ -377,6 +398,27 @@ def _extract_parameters(message: str) -> dict[str, Any]:
         if len(candidate) > best_len and _matches(text, candidate):
             best_district = district
             best_len = len(candidate)
+    if not best_district and selected_region:
+        all_districts: dict[str, str] = {}
+        for districts in region_districts.values():
+            for district in districts:
+                all_districts[_normalize(district)] = district
+        for official, variants in reference.get("district_aliases", {}).items():
+            for variant in variants:
+                all_districts.setdefault(_normalize(variant), official)
+        best_len = 0
+        for candidate, district in all_districts.items():
+            if len(candidate) > best_len and _matches(text, candidate):
+                best_district = district
+                best_len = len(candidate)
+    if not best_district and selected_region:
+        raw_district = re.search(r"\bрайон(?:е|а)?\s+([^,.;]+)", text)
+        if raw_district:
+            value = raw_district.group(1)
+            value = re.split(r"\b(?:улица|ул\.?|проспект|материал|этаж|площадь|дом)\b", value, maxsplit=1)[0]
+            value = value.strip(" ,;:-")
+            if value:
+                params["district"] = value
     if best_district:
         params["district"] = best_district
 
@@ -402,7 +444,10 @@ def _extract_parameters(message: str) -> dict[str, Any]:
             candidate = _normalize(street)
             if candidate in excluded:
                 continue
-            if len(candidate) > best_len and _contains_word(text, candidate):
+            if len(candidate) > best_len and any(
+                _contains_word(text, variant)
+                for variant in _street_name_variants(street)
+            ):
                 best_street = street
                 best_len = len(candidate)
         if best_street:
@@ -557,12 +602,52 @@ def _pending_params_from_history(history: list[dict]) -> list[str]:
     return []
 
 
+def _is_information_question(text: str) -> bool:
+    normalized = _normalize(text)
+    asks_about_parameters = any(word in normalized for word in ("параметр", "признак", "характеристик"))
+    asks_to_explain = any(word in normalized for word in ("объясни", "расскажи", "какие", "что влияет", "как работает"))
+    return asks_about_parameters and asks_to_explain
+
+
+def _answer_existing_comparison(text: str, context: dict[str, Any] | None) -> str | None:
+    normalized = _normalize(text)
+    asks_for_comparison = any(word in normalized for word in (
+        "перспективнее", "сильнее подорож", "выгоднее", "сравни результаты", "больший прирост", "прирост", "абсолютный рост", "рост стоимости", "вырастет сильнее",
+        "что будет дороже", "какая подорожает",
+    ))
+    if not asks_for_comparison or not isinstance(context, dict):
+        return None
+    apartments = context.get("apartments")
+    if not isinstance(apartments, list) or len(apartments) < 2:
+        return None
+    rows = [
+        item for item in apartments
+        if isinstance(item, dict)
+        and isinstance(item.get("title"), str)
+        and isinstance(item.get("growth"), (int, float))
+        and isinstance(item.get("startPrice"), (int, float))
+        and isinstance(item.get("endPrice"), (int, float))
+    ]
+    if len(rows) < 2:
+        return None
+    asks_for_percent = "процент" in normalized or "%" in normalized
+    if asks_for_percent:
+        best = max(rows, key=lambda item: float(item["growth"]))
+        return f"По процентному росту лидирует {best['title']}: {float(best['growth']):.1f}% за выбранный период."
+    best = max(rows, key=lambda item: float(item["endPrice"]) - float(item["startPrice"]))
+    growth_rub = round((float(best["endPrice"]) - float(best["startPrice"])) * 1_000_000)
+    formatted_growth = f"{growth_rub:,}".replace(",", " ")
+    return f"По абсолютному приросту стоимости лидирует {best['title']}: прогнозируемое увеличение за выбранный период — {formatted_growth} ₽."
+
+
+
 def starts_new_forecast(message: str, history: list[dict]) -> bool:
     """Detect a new forecast request so values from an older apartment cannot carry over."""
     text = _normalize(message)
     reset_markers = (
         "новая квартира",
         "новую квартиру",
+        "одну квартиру",
         "другая квартира",
         "другую квартиру",
         "новый прогноз",
@@ -575,6 +660,9 @@ def starts_new_forecast(message: str, history: list[dict]) -> bool:
     )
     if any(marker in text for marker in reset_markers):
         return True
+
+    if _is_information_question(text):
+        return False
 
     # Multi-apartment conversation state is stored in the assistant's structured
     # history marker; preserve it for recalculation and later corrections.
@@ -590,6 +678,8 @@ def _is_forecast_context(message: str, history: list[dict],
                          current: dict[str, Any]) -> bool:
     """Понимает, относится ли сообщение к сценарию прогноза."""
     text = _normalize(message)
+    if _is_information_question(message):
+        return False
     if any(keyword in text for keyword in FORECAST_KEYWORDS):
         return True
     if _pending_params_from_history(history) and current:
@@ -827,7 +917,7 @@ def _split_apartment_descriptions(text: str, expected_count: int) -> list[str]:
     # Explicit address introductions after a conjunction are also boundaries,
     # while «площадь 54 м² и этаж 7» does not match this pattern.
     address_after_and = re.compile(
-        r"\bи\s+(?=(?:квартира\b|улиц\w*\b|ул\.?\s|проспект\w*\b|"
+        r"\bи\s+(?=(?:квартир\w*\b|улиц\w*\b|ул\.?\s|проспект\w*\b|"
         r"на\s+(?!(?:первом|втором|третьем|четвертом|пятом|шестом|седьмом|"
         r"восьмом|девятом|десятом)\s+этаж)[а-яё0-9-]+"
         r"(?=[^.;]{0,100}(?:площад\w*|м²|м2|\d{1,3}\s*м\b))))"
@@ -850,6 +940,25 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
     state = _state_from_history(history)
     resolved_index: int | None = None
     clarification_values: dict[str, Any] = {}
+    pending_field: str | None = None
+    pending_assistant = history[-1].get("content", "") if history and history[-1].get("role") == "assistant" else ""
+    pending_question = re.search(r"уточните параметры (\d+)-й квартиры:\s*([^\n]+)", _normalize(pending_assistant))
+    if state and pending_question:
+        pending_index = int(pending_question.group(1)) - 1
+        pending_text = pending_question.group(2)
+        pending_fields = [key for key, label in PARAM_LABELS.items() if _normalize(label) in pending_text]
+        if 0 <= pending_index < len(state["apartments"]) and len(pending_fields) == 1:
+            pending_field = pending_fields[0]
+            resolved_index = pending_index
+            clarification_values = _extract_apartment_description(text)
+            if not clarification_values and re.fullmatch(r"\d{1,4}(?:[.,]\d+)?", normalized):
+                raw_value = float(normalized.replace(",", "."))
+                if pending_field in ("area", "floor", "year_build"):
+                    clarification_values[pending_field] = int(raw_value) if raw_value.is_integer() and pending_field != "area" else raw_value
+            if pending_field in clarification_values and pending_field == "area" and clarification_values[pending_field] < 25:
+                state_json = json.dumps(state, ensure_ascii=False)
+                state_tag = f"{_STATE_MARKER}{state_json}[[/APARTMENTS_STATE_JSON]]"
+                return "Площадь квартиры не может быть меньше 25 м². Укажите фактическую площадь квартиры.\n" + state_tag
     if state and history and history[-1].get("role") == "assistant" and "к какой квартире относятся" in _normalize(history[-1].get("content", "")):
         answer = normalized.strip(" .")
         if answer.isdigit():
@@ -869,15 +978,22 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
         requested = 2
     multi_cue = requested > 1 or any(word in normalized for word in (
         "сравни", "сравнить", "обе квартир", "все квартир", "квартир:",
+        "посчитай обе", "рассчитай обе", "пересчитай обе",
         "еще одна", "ещё одна", "их стоимость", "несколько квартир",
         "следующих объектов", "вариант покупки", "жилье сильнее", "жильё сильнее",
         "из этих квартир", "какая из квартир", "какой из квартир",
     ))
     if requested < 2 and multi_cue and any(word in normalized for word in ("обе", "квартиры", "вариант покупки", "жилье сильнее", "жильё сильнее", "из этих квартир")):
         requested = 2
-    if state and resolved_index is None and not multi_cue and not any(keyword in normalized for keyword in FORECAST_KEYWORDS):
-        if not _extract_parameters(text) and not re.search(r"\b(?:перва|перву|втор|треть|четверт|пята|пятой|пятую|шестая|шестой|восьм|девят|десят)\w*\b", normalized):
-            return None
+    single_apartment_request = bool(re.search(r"\b(?:одну|одна)\s+квартир", normalized))
+    if state and single_apartment_request and requested <= 1 and "сравни" not in normalized:
+        return None
+    has_ordinal_or_parameters = bool(
+        _extract_apartment_description(text)
+        or re.search(r"\b(?:перва|перву|втор|треть|четверт|пята|пятой|пятую|шестая|шестой|восьм|девят|десят)\w*\b", normalized)
+    )
+    if state and resolved_index is None and not multi_cue and not has_ordinal_or_parameters:
+        return None
     if state and any(word in normalized for word in ("сравни уже", "сравнить уже", "эти квартиры", "перспективнее")) and not _extract_parameters(text):
         return None
     if not state and not multi_cue:
@@ -914,6 +1030,10 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
     ordinal_pattern = re.compile(r"\b(перва\w*|перву\w*|первой|одна|одной|втор\w*|другая|другой|треть\w*|четверт\w*|пятая|пятой|пятую|шестая|шестой|шестую|восьмая|восьмой|восьмую|девятая|девятой|девятую|десятая|десятой|десятую)\b", re.I)
     matches = list(ordinal_pattern.finditer(text))
     generic_segments = _split_apartment_descriptions(text, count) if count > 1 else [text]
+    if matches and len(matches) < count and len(generic_segments) >= count:
+        first_word = _normalize(matches[0].group(1))
+        if first_word.startswith(("первая", "первую", "первой")):
+            matches = []
     if "две последние" in normalized and count >= 2:
         shared = _extract_parameters(text)
         for item in apartments[-2:]:
@@ -923,7 +1043,8 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
         if any(word in _normalize(prefix) for word in ("обе", "все", "кажд", "у каждой", "у всех")):
             shared = _extract_parameters(prefix)
             for item in apartments:
-                item.update(shared)
+                for key, value in shared.items():
+                    item.setdefault(key, value)
         for position, match in enumerate(matches):
             word = _normalize(match.group(1))
             index = 0 if word.startswith(("одна", "одной")) else 1 if word.startswith(("другая", "другой")) else next((idx for prefix, idx in _APARTMENT_ORDINALS.items() if word.startswith(prefix)), None)
@@ -936,18 +1057,21 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
             segment = text[match.end():end]
             apartments[index].update(_extract_apartment_description(segment))
         tail = text[matches[-1].end():]
-        if any(word in _normalize(tail) for word in ("обе", "все", "кажд", "у каждой", "у всех")):
-            shared = _extract_parameters(tail)
+        shared_marker = re.search(r"\b(?:обе|оба|все|кажд\w*|у каждой|у всех)\b", _normalize(tail))
+        if shared_marker:
+            shared = _extract_parameters(tail[shared_marker.start():])
             for item in apartments:
-                item.update(shared)
+                for key, value in shared.items():
+                    item.setdefault(key, value)
     elif len(generic_segments) >= 2:
         for index, segment in enumerate(generic_segments[:count]):
             apartments[index + active_start].update(_extract_apartment_description(segment))
-        common_marker = re.search(r"\b(?:обе|оба|все|кажд\w*|у каждой|у всех)\b", normalized)
+        common_marker = re.search(r"\b(?:обе|оба|все|кажд\w*|у каждой|у всех)\b", _normalize(generic_segments[-1]))
         if common_marker:
-            shared = _extract_parameters(text[common_marker.start():])
+            shared = _extract_parameters(generic_segments[-1][common_marker.start():])
             for item in apartments[active_start:]:
-                item.update(shared)
+                for key, value in shared.items():
+                    item.setdefault(key, value)
     elif count == 1:
         apartments[0].update(_extract_parameters(text))
     else:
@@ -970,6 +1094,25 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
         elif common and not state:
             apartments[0].update(common)
 
+    if count > 1:
+        shared_pattern = re.compile(r"\b(?:обе\w*|обо\w*|все|кажд\w*|у каждой|у всех|для обеих|для обоих)\b", re.I)
+        if matches:
+            shared_segments = [text[:matches[0].start()]]
+            shared_segments.extend(
+                text[match.end():(matches[index + 1].start() if index + 1 < len(matches) else len(text))]
+                for index, match in enumerate(matches)
+            )
+        elif len(generic_segments) >= 2:
+            shared_segments = generic_segments
+        else:
+            shared_segments = [text]
+        for segment in shared_segments:
+            marker = shared_pattern.search(segment)
+            if marker:
+                shared_values = _extract_parameters(segment[marker.start():])
+                for item in apartments[active_start:]:
+                    for key, value in shared_values.items():
+                        item.setdefault(key, value)
     # Shared forecast horizon is valid for every apartment in the current comparison.
     horizon = _extract_parameters(text).get("n_years")
     if horizon is None and state:
@@ -978,11 +1121,38 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
     for item in apartments:
         item.setdefault("n_years", horizon)
 
+    reference = get_reference_data() or _fallback_reference()
+    region_districts = reference.get("region_districts", {})
+    for index, item in enumerate(apartments, 1):
+        region = item.get("region")
+        district = item.get("district")
+        if region and district and district not in region_districts.get(region, []):
+            item.pop("district", None)
+            available = region_districts.get(region, [])
+            options = ", ".join(available)
+            state_json = json.dumps({"apartments": apartments, "n_years": horizon, "operation": operation, "active_start": active_start}, ensure_ascii=False)
+            state_tag = f"{_STATE_MARKER}{state_json}[[/APARTMENTS_STATE_JSON]]"
+            return (
+                f"Уточните параметры {index}-й квартиры: район. Район «{district}» "
+                f"не относится к округу {region}. Доступные районы: {options}.\n" + state_tag
+            )
+
     next_incomplete = next(
         ((index, item) for index, item in enumerate(apartments, 1)
          if any(key not in item for key in REQUIRED_PARAMS)),
         None,
     )
+    invalid_area = next(
+        ((index, item) for index, item in enumerate(apartments, 1)
+         if item.get("area") is not None and float(item["area"]) < 25),
+        None,
+    )
+    if invalid_area:
+        index, item = invalid_area
+        item.pop("area", None)
+        state_json = json.dumps({"apartments": apartments, "n_years": horizon, "operation": operation, "active_start": active_start}, ensure_ascii=False)
+        state_tag = f"{_STATE_MARKER}{state_json}[[/APARTMENTS_STATE_JSON]]"
+        return f"Уточните параметры {index}-й квартиры: площадь квартиры. Площадь не может быть меньше 25 м². Укажите фактическую площадь.\n" + state_tag
     state_json = json.dumps({"apartments": apartments, "n_years": horizon, "operation": operation, "active_start": active_start}, ensure_ascii=False)
     state_tag = f"{_STATE_MARKER}{state_json}[[/APARTMENTS_STATE_JSON]]"
     if next_incomplete:
@@ -998,7 +1168,8 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
     return summary + "\n" + command + "\n" + state_tag
 
 
-def chat(message: str, history: list[dict] | None = None) -> str:
+def chat(message: str, history: list[dict] | None = None,
+         result_context: dict[str, Any] | None = None) -> str:
     """Обрабатывает сообщение и необязательную историю диалога."""
     message = message.strip()
 
@@ -1033,6 +1204,17 @@ def chat(message: str, history: list[dict] | None = None) -> str:
     if multi_response is not None:
         return multi_response
 
+    comparison_answer = _answer_existing_comparison(message, result_context)
+    if comparison_answer is not None:
+        return comparison_answer
+
+    if _is_information_question(message):
+        return (
+            "Для прогноза модель использует административный округ, район, улицу, "
+            "материал стен, год постройки, этаж и площадь квартиры. Горизонт "
+            "прогноза задаёт, на сколько лет рассчитываются значения."
+        )
+
     # Детерминированно собираем параметры из истории и текущего сообщения.
     # Это гарантирует, что n_years по умолчанию равен 5, а недостающие
     # параметры перечисляются без участия модели.
@@ -1042,6 +1224,8 @@ def chat(message: str, history: list[dict] | None = None) -> str:
     if _is_forecast_context(message, messages, params, current):
         if missing:
             return _missing_parameters_message(missing)
+        if float(params.get("area", 0)) < 25:
+            return "Площадь квартиры не может быть меньше 25 м². Укажите фактическую площадь квартиры."
         return _format_forecast_confirmation(params)
 
     # Для общих вопросов модель получает уже распознанные параметры,
