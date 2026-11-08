@@ -1,4 +1,4 @@
-/** Параметры квартиры в формате, ожидаемом Flask endpoint-ами прогнозирования. */
+/** Параметры квартиры в формате API прогнозирования. */
 export interface ApartmentInput {
   region: string;
   district: string;
@@ -21,7 +21,7 @@ export interface Apartment {
   area: number;
 }
 
-/** Одна строка поля forecast в ответе Flask. Имена ключей — часть JSON-контракта. */
+/** Одна строка поля forecast в ответе API. Имена ключей — часть JSON-контракта. */
 export interface ForecastPoint {
   Год: number;
   "Прогноз цены, млн руб.": number;

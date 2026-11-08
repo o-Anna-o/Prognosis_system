@@ -20,13 +20,12 @@ _load_error: str | None = None
 class PayloadValidationError(ValueError):
     """Invalid client input, distinct from errors raised by model code."""
 
-# The model and agent are maintained in web_app; keep their code and artifacts
-# intact while exposing them through Django.
+# Import the existing model module under its original name. The cached model
+# artifact refers to that module path, so keep it stable during the migration.
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 WEB_APP_DIR = PROJECT_ROOT / "web_app"
-for import_path in (str(PROJECT_ROOT), str(WEB_APP_DIR)):
-    if import_path not in sys.path:
-        sys.path.insert(0, import_path)
+if str(WEB_APP_DIR) not in sys.path:
+    sys.path.insert(0, str(WEB_APP_DIR))
 
 import model as prognosis_model  # noqa: E402
 

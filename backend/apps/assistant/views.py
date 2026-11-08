@@ -69,4 +69,4 @@ def chat(request):
             if provider_error:
                 message += f" Детали Ollama: {provider_error[:300]}"
             return Response({"error": message, "provider": "ollama"}, status=503)
-        return Response({"error": "Не удалось обработать сообщение"}, status=503)
+        return Response({"error": "Не удалось обработать сообщение. Проверьте журнал Django."}, status=503)

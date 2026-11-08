@@ -1,5 +1,5 @@
 
-# web_app/agent/storage.py
+# PostgreSQL-backed chat storage shared by the Django assistant.
 
 import json
 import os

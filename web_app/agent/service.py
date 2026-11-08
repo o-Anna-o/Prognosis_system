@@ -755,5 +755,5 @@ def chat(message: str, history: list[dict] | None = None) -> str:
     
     raise RuntimeError(
         "Агент не вернул текстовый ответ. "
-        "Проверьте логи Flask и совместимость версий LangChain и Ollama."
+        "Проверьте журнал Django и совместимость версий LangChain и Ollama."
     )

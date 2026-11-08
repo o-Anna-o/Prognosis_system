@@ -1,4 +1,4 @@
-/* `web_app/static/style.css` */
+/* Global design tokens and shared interface styles. */
 :root {
     --blue-900: #0b2a5b;
     --blue-800: #123a7a;
