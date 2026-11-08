@@ -132,7 +132,7 @@ function IndividualChart({ result, title, order }: { result: PredictionResult; t
 
 export function ApartmentWorkspace() {
   const { apartments } = useApartmentsState();
-  const { addApartment, replaceApartmentsFromAssistant, removeApartment, updateApartmentParameters, setApartmentPrediction, clearApartmentPrediction, setApartmentPredictions, setApartmentError, startApartmentPrediction, cancelApartmentPrediction, resetApartments, toggleApartmentCollapsed, setApartmentsCollapsed } = useApartmentsActions();
+  const { addApartment, replaceApartmentsFromAssistant, appendApartmentsFromAssistant, removeApartment, updateApartmentParameters, setApartmentPrediction, setApartmentPredictions, setApartmentError, startApartmentPrediction, cancelApartmentPrediction, resetApartments, toggleApartmentCollapsed, setApartmentsCollapsed } = useApartmentsActions();
   const referenceQuery = useQuery({
     queryKey: ["reference"],
     queryFn: ({ signal }) => getReference(signal),
@@ -146,7 +146,7 @@ export function ApartmentWorkspace() {
   apartmentsRef.current = apartments;
   const requestVersion = useRef(0);
   const pendingIds = useRef<string[]>([]);
-  const pendingAssistantPrediction = useRef<{ id: string; signature: string } | null>(null);
+  const pendingAssistantPrediction = useRef<{ ids: string[]; signature: string; predictAll: boolean } | null>(null);
   const predictRef = useRef<(id?: string) => Promise<void>>(async () => undefined);
   const [activeResultId, setActiveResultId] = useState<string | "comparison">("comparison");
   const [comparisonSnapshot, setComparisonSnapshot] = useState<string | null>(null);
@@ -269,10 +269,12 @@ export function ApartmentWorkspace() {
   useEffect(() => {
     const pending = pendingAssistantPrediction.current;
     if (!pending) return;
-    const apartment = apartments.find((item) => item.id === pending.id);
-    if (!apartment || parameterSignature([apartment]) !== pending.signature) return;
+    const selected = pending.ids.map((id) => apartments.find((item) => item.id === id));
+    if (selected.some((item) => !item)) return;
+    const ready = selected as NonNullable<(typeof selected)[number]>[];
+    if (parameterSignature(ready) !== pending.signature) return;
     pendingAssistantPrediction.current = null;
-    void predictRef.current(pending.id);
+    void predictRef.current(pending.predictAll ? undefined : ready[0]!.id);
   }, [apartments]);
 
   useEffect(() => {
@@ -283,43 +285,52 @@ export function ApartmentWorkspace() {
         window.dispatchEvent(new CustomEvent("prognosis:assistant-error", { detail: "Агент передал некорректные параметры квартиры." }));
         return;
       }
-      const data = detail as Record<string, unknown>;
+      const envelope = detail as Record<string, unknown>;
+      const data = Array.isArray(envelope.apartments)
+        ? envelope.apartments
+        : [envelope];
+      if (!data.length || data.some((item) => item === null || typeof item !== "object" || Array.isArray(item))) {
+        window.dispatchEvent(new CustomEvent("prognosis:assistant-error", { detail: "Агент передал некорректный список квартир." }));
+        return;
+      }
       const first = apartmentsRef.current[0];
       const reference = referenceQuery.data;
       if (!first || !reference) {
         window.dispatchEvent(new CustomEvent("prognosis:assistant-error", { detail: "Справочники ещё загружаются. Попробуйте повторить запрос." }));
         return;
       }
-      const textValue = (key: string) => data[key] === undefined || data[key] === null ? "" : String(data[key]);
-      const candidate: ApartmentInput = {
-        region: textValue("region"),
-        district: textValue("district"),
-        street: textValue("street"),
-        wall_material: textValue("wall_material"),
-        year_build: textValue("year_build"),
-        floor: textValue("floor"),
-        area: textValue("area"),
-        n_years: textValue("n_years"),
-      };
-      const errors = validateApartment(candidate, reference);
-      const firstError = Object.entries(errors)[0];
-      if (firstError) {
-        const message = `Параметр «${assistantFieldNames[firstError[0]] ?? firstError[0]}»: ${firstError[1]}`;
-        window.dispatchEvent(new CustomEvent("prognosis:assistant-error", { detail: message }));
-        return;
+      const candidates: ApartmentInput[] = [];
+      for (const item of data as Record<string, unknown>[]) {
+        const textValue = (key: string) => item[key] === undefined || item[key] === null ? "" : String(item[key]);
+        const candidate: ApartmentInput = {
+          region: textValue("region"), district: textValue("district"), street: textValue("street"),
+          wall_material: textValue("wall_material"), year_build: textValue("year_build"),
+          floor: textValue("floor"), area: textValue("area"), n_years: textValue("n_years"),
+        };
+        const errors = validateApartment(candidate, reference);
+        const firstError = Object.entries(errors)[0];
+        if (firstError) {
+          const message = `Квартира №${candidates.length + 1}, параметр «${assistantFieldNames[firstError[0]] ?? firstError[0]}»: ${firstError[1]}`;
+          window.dispatchEvent(new CustomEvent("prognosis:assistant-error", { detail: message }));
+          return;
+        }
+        candidates.push(candidate);
       }
 
       invalidatePending();
       pendingAssistantPrediction.current = null;
       window.dispatchEvent(new Event("prognosis:show-forecast"));
-      const id = replaceApartmentsFromAssistant(candidate);
-      pendingAssistantPrediction.current = { id, signature: parameterSignature([{ id, parameters: candidate }]) };
+      const ids = envelope.operation === "append"
+        ? appendApartmentsFromAssistant(candidates)
+        : replaceApartmentsFromAssistant(candidates);
+      const inserted = ids.map((id, index) => ({ id, parameters: candidates[index]! }));
+      pendingAssistantPrediction.current = { ids, signature: parameterSignature(inserted), predictAll: envelope.operation === "append" || candidates.length > 1 };
       setComparisonSnapshot(null);
-      setActiveResultId(id);
+      setActiveResultId(ids.length > 1 ? "comparison" : ids[0]!);
     };
     window.addEventListener("prognosis:assistant-calculation", handleAssistantCalculation);
     return () => window.removeEventListener("prognosis:assistant-calculation", handleAssistantCalculation);
-  }, [referenceQuery.data, replaceApartmentsFromAssistant]);
+  }, [referenceQuery.data, replaceApartmentsFromAssistant, appendApartmentsFromAssistant]);
 
   if (!referenceQuery.data) return <section className="card" role="status">Модель и справочники загружаются…</section>;
   return <>

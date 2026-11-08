@@ -15,7 +15,7 @@ import type {
 
 type ApartmentsAction =
   | { type: "apartment/added"; id: string; parameters: ApartmentInput }
-  | { type: "apartments/replacedFromAssistant"; id: string; parameters: ApartmentInput }
+  | { type: "apartments/replacedFromAssistant"; apartments: { id: string; parameters: ApartmentInput }[] }
   | { type: "apartment/removed"; id: string }
   | { type: "apartment/parametersChanged"; id: string; patch: ApartmentParameterPatch }
   | { type: "apartment/predictionSet"; id: string; prediction: PredictionResult }
@@ -36,7 +36,8 @@ interface ApartmentsStateContextValue extends ApartmentsState {
 
 interface ApartmentsActionsContextValue {
   addApartment: (parameters?: ApartmentInput) => string;
-  replaceApartmentsFromAssistant: (parameters: ApartmentInput) => string;
+  replaceApartmentsFromAssistant: (apartments: ApartmentInput[]) => string[];
+  appendApartmentsFromAssistant: (apartments: ApartmentInput[]) => string[];
   removeApartment: (id: string) => void;
   updateApartmentParameters: (id: string, patch: ApartmentParameterPatch) => void;
   setApartmentPrediction: (id: string, prediction: PredictionResult) => void;
@@ -95,18 +96,11 @@ function apartmentsReducer(state: ApartmentsState, action: ApartmentsAction): Ap
       };
     }
     case "apartments/replacedFromAssistant": {
-      const apartment: ApartmentState = {
-        id: action.id,
-        order: 1,
-        formRevision: 0,
-        parameters: action.parameters,
-        prediction: null,
-        isPredictionStale: false,
-        isCollapsed: false,
-        isCalculating: false,
-        error: null,
-      };
-      return { apartments: [apartment], activeApartmentId: apartment.id, nextOrder: 2 };
+      const apartments = action.apartments.map(({ id, parameters }, index): ApartmentState => ({
+        id, order: index + 1, formRevision: 0, parameters, prediction: null,
+        isPredictionStale: false, isCollapsed: false, isCalculating: false, error: null,
+      }));
+      return { apartments, activeApartmentId: apartments[0]?.id ?? null, nextOrder: apartments.length + 1 };
     }
     case "apartment/removed": {
       const apartments = state.apartments.filter((apartment) => apartment.id !== action.id);
@@ -230,11 +224,16 @@ export function ApartmentsProvider({ children }: ApartmentsProviderProps) {
     },
     [],
   );
-  const replaceApartmentsFromAssistant = useCallback((parameters: ApartmentInput) => {
-    const id = globalThis.crypto.randomUUID();
-    dispatch({ type: "apartments/replacedFromAssistant", id, parameters });
-    return id;
+  const replaceApartmentsFromAssistant = useCallback((parameters: ApartmentInput[]) => {
+    const apartments = parameters.map((parameters) => ({ id: globalThis.crypto.randomUUID(), parameters }));
+    dispatch({ type: "apartments/replacedFromAssistant", apartments });
+    return apartments.map(({ id }) => id);
   }, []);
+  const appendApartmentsFromAssistant = useCallback((parameters: ApartmentInput[]) => parameters.map((item) => {
+    const id = globalThis.crypto.randomUUID();
+    dispatch({ type: "apartment/added", id, parameters: item });
+    return id;
+  }), []);
   const removeApartment = useCallback((id: string) => dispatch({ type: "apartment/removed", id }), []);
   const updateApartmentParameters = useCallback(
     (id: string, patch: ApartmentParameterPatch) =>
@@ -279,6 +278,7 @@ export function ApartmentsProvider({ children }: ApartmentsProviderProps) {
     () => ({
       addApartment,
       replaceApartmentsFromAssistant,
+      appendApartmentsFromAssistant,
       removeApartment,
       updateApartmentParameters,
       setApartmentPrediction,
@@ -295,6 +295,7 @@ export function ApartmentsProvider({ children }: ApartmentsProviderProps) {
     [
       addApartment,
       replaceApartmentsFromAssistant,
+      appendApartmentsFromAssistant,
       removeApartment,
       updateApartmentParameters,
       setApartmentPrediction,

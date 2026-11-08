@@ -257,6 +257,7 @@ function initializeAssistant(): () => void {
         visibleAnswer = visibleAnswer.replace(commandMatch[0], "").trim();
         window.dispatchEvent(new CustomEvent("prognosis:assistant-calculation", { detail: calculationPayload }));
       }
+      visibleAnswer = visibleAnswer.replace(/\[\[APARTMENTS_STATE_JSON\]\][\s\S]*?\[\[\/APARTMENTS_STATE_JSON\]\]/g, "").trim();
       if (visibleAnswer) {
         addMessage("assistant", visibleAnswer);
         history.push({ role: "assistant", content: visibleAnswer });

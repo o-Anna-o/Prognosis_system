@@ -5,6 +5,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from langchain.agents import create_agent
 from langchain_ollama import ChatOllama
@@ -277,6 +278,18 @@ def _extract_parameters(message: str) -> dict[str, Any]:
     m = re.search(r"этаж(?:е)?\s*[:\s-]*(\d{1,2})", text)
     if not m:
         m = re.search(r"(\d{1,2})\s*(?:-?[а-я]+)?\s*этаж(?!\w)", text)
+    if not m:
+        floor_words = {
+            "первом": 1, "первый": 1, "первом этаже": 1,
+            "втором": 2, "второй": 2, "третьем": 3, "третий": 3,
+            "четвертом": 4, "четвертый": 4, "пятом": 5, "пятый": 5,
+            "шестом": 6, "шестой": 6, "седьмом": 7, "седьмой": 7,
+            "восьмом": 8, "восьмой": 8, "девятом": 9, "девятый": 9,
+            "десятом": 10, "десятый": 10,
+        }
+        floor_match = re.search(r"\b(первом|первый|втором|второй|третьем|третий|четвертом|четвертый|пятом|пятый|шестом|шестой|седьмом|седьмой|восьмом|восьмой|девятом|девятый|десятом|десятый)\s+этаж", text)
+        if floor_match:
+            params["floor"] = floor_words[floor_match.group(1)]
     if m:
         value = int(m.group(1))
         if value >= 1:
@@ -290,7 +303,7 @@ def _extract_parameters(message: str) -> dict[str, Any]:
     if not m:
         m = re.search(
             r"(\d{1,4}(?:[.,]\d+)?)\s*"
-            r"(?:кв\.?\s*м|м²|м2|кв\.?\s*метр\w*|метр\w*)",
+            r"(?:кв\.?\s*м|м²|м2|м(?!\w)|кв\.?\s*метр\w*|метр\w*|квадрат\w*)",
             text,
         )
     if m:
@@ -395,6 +408,18 @@ def _extract_parameters(message: str) -> dict[str, Any]:
         if best_street:
             params["street"] = best_street
 
+    return params
+
+
+def _extract_apartment_description(text: str) -> dict[str, Any]:
+    """Extract apartment fields, including an unlabelled final area value."""
+    params = _extract_parameters(text)
+    if "area" not in params:
+        trailing = re.search(r"[,;]\s*(\d{1,3}(?:[.,]\d+)?)\s*$", text)
+        if trailing:
+            area = float(trailing.group(1).replace(",", "."))
+            if 1 <= area <= 300:
+                params["area"] = area
     return params
 
 
@@ -551,6 +576,11 @@ def starts_new_forecast(message: str, history: list[dict]) -> bool:
     if any(marker in text for marker in reset_markers):
         return True
 
+    # Multi-apartment conversation state is stored in the assistant's structured
+    # history marker; preserve it for recalculation and later corrections.
+    if _state_from_history(history):
+        return False
+
     has_forecast_intent = any(keyword in text for keyword in FORECAST_KEYWORDS)
     return has_forecast_intent and not _pending_params_from_history(history)
 
@@ -700,6 +730,274 @@ def _extract_text(content: Any) -> str:
     return text
 
 
+_APARTMENT_ORDINALS = {
+    "перв": 0, "втор": 1, "треть": 2, "четверт": 3, "пят": 4,
+    "шест": 5, "седьм": 6, "восьм": 7, "девят": 8, "десят": 9,
+}
+_STATE_MARKER = "[[APARTMENTS_STATE_JSON]]"
+
+
+def _requested_apartment_count(text: str) -> int:
+    normalized = _normalize(text)
+    words = {
+        "две": 2, "два": 2, "три": 3, "четыре": 4, "пять": 5,
+        "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
+    }
+    match = re.search(r"\b(\d{1,2}|две|два|три|четыре|пять|шесть|семь|восемь|девять|десять)\s+(?:квартир\w*|объект\w*|вариант\w*)", normalized)
+    count = int(match.group(1)) if match and match.group(1).isdigit() else words.get(match.group(1), 0) if match else 0
+    if re.search(r"\b(?:еще|ещё) одна\b", normalized):
+        count = max(count, 2)
+    if re.search(r"\bодна\b.*\bдругая\b", normalized):
+        count = max(count, 2)
+    ordinal_forms = re.finditer(
+        r"\b(перва\w*|перву\w*|втор\w*|треть\w*|четверт\w*|пятая|пятой|пятую|шестая|шестой|шестую|восьмая|восьмой|восьмую|девятая|девятой|девятую|десятая|десятой|десятую)\b",
+        normalized,
+    )
+    for ordinal in ordinal_forms:
+        if re.match(r"\s+этаж", normalized[ordinal.end():]):
+            continue
+        word = ordinal.group(1)
+        index = next((value for prefix, value in _APARTMENT_ORDINALS.items() if word.startswith(prefix)), None)
+        if index is not None:
+            count = max(count, index + 1)
+    return count
+
+
+def _state_from_history(history: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for item in reversed(history):
+        if item.get("role") != "assistant":
+            continue
+        content = item.get("content", "")
+        start = content.find(_STATE_MARKER)
+        if start < 0:
+            continue
+        raw = content[start + len(_STATE_MARKER):].split("[[/APARTMENTS_STATE_JSON]]", 1)[0]
+        try:
+            state = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(state, dict) and isinstance(state.get("apartments"), list):
+            return state
+    return None
+
+
+def _split_apartment_descriptions(text: str, expected_count: int) -> list[str]:
+    """Split only on object-level cues; conjunctions between fields stay intact."""
+    ordinal = re.compile(
+        r"\b(перва\w*|перву\w*|втор\w*|другая|другой|треть\w*|четверт\w*|"
+        r"пятая|пятой|пятую|шестая|шестой|шестую|восьмая|восьмой|восьмую|"
+        r"девятая|девятой|девятую|десятая|десятой|десятую)\b",
+        re.I,
+    )
+    ordinal_matches = list(ordinal.finditer(text))
+    if len(ordinal_matches) >= 2:
+        starts = [match.start() for match in ordinal_matches]
+        return [text[starts[i]:starts[i + 1]].strip(" ,;:.\n") for i in range(len(starts) - 1)] + [text[starts[-1]:].strip(" ,;:.\n")]
+
+    boundaries = [match.start() for match in re.finditer(r";\s*", text)]
+    reference = get_reference_data() or _fallback_reference()
+    normalized = _normalize(text)
+
+    # A new region after «и» is a strong apartment boundary. This handles
+    # listings that repeat the region but omit ordinal labels.
+    region_names = set(reference.get("regions", [])) | set(reference.get("region_names", {}).values())
+    for region in sorted((str(value) for value in region_names if value), key=len, reverse=True):
+        candidate = _normalize(region)
+        pattern = re.compile(r"(?<!\w)" + re.escape(candidate) + r"(?!\w)")
+        for match in pattern.finditer(normalized):
+            prefix = normalized[max(0, match.start() - 16):match.start()]
+            if re.search(r"\bи\s*$", prefix):
+                boundaries.append(match.start() - (len(prefix) - len(prefix.rstrip())))
+
+    # A street named after «и» or a semicolon begins another object. Search
+    # the application reference so numbered names such as 15-я Парковая remain
+    # one street token and their number is never treated as an apartment field.
+    street_positions: list[int] = []
+    for street in sorted(reference.get("streets", []), key=len, reverse=True):
+        candidate = _normalize(street)
+        for match in re.finditer(r"(?<!\w)" + re.escape(candidate) + r"(?!\w)", normalized):
+            if not any(abs(match.start() - pos) < max(3, len(candidate) // 2) for pos in street_positions):
+                street_positions.append(match.start())
+    street_positions.sort()
+    for position in street_positions[1:]:
+        prefix = normalized[max(0, position - 16):position]
+        if re.search(r"(?:\bи|;)\s*$", prefix) or re.search(r",\s*$", prefix):
+            boundaries.append(position)
+
+    # Explicit address introductions after a conjunction are also boundaries,
+    # while «площадь 54 м² и этаж 7» does not match this pattern.
+    address_after_and = re.compile(
+        r"\bи\s+(?=(?:квартира\b|улиц\w*\b|ул\.?\s|проспект\w*\b|"
+        r"на\s+(?!(?:первом|втором|третьем|четвертом|пятом|шестом|седьмом|"
+        r"восьмом|девятом|десятом)\s+этаж)[а-яё0-9-]+"
+        r"(?=[^.;]{0,100}(?:площад\w*|м²|м2|\d{1,3}\s*м\b))))"
+    )
+    for match in address_after_and.finditer(normalized):
+        boundaries.append(match.start())
+
+    boundaries = sorted(set(position for position in boundaries if 0 < position < len(text)))
+    if not boundaries:
+        return [text]
+    boundaries = boundaries[:max(0, expected_count - 1)]
+    starts = [0, *boundaries]
+    return [text[starts[i]:starts[i + 1]].strip(" ,;:.\n") for i in range(len(starts) - 1)] + [text[starts[-1]:].strip(" ,;:.\n")]
+
+
+def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> str | None:
+    """Collect ordinal apartment descriptions and return a batch UI command."""
+    text = message.strip()
+    normalized = _normalize(text)
+    state = _state_from_history(history)
+    resolved_index: int | None = None
+    clarification_values: dict[str, Any] = {}
+    if state and history and history[-1].get("role") == "assistant" and "к какой квартире относятся" in _normalize(history[-1].get("content", "")):
+        answer = normalized.strip(" .")
+        if answer.isdigit():
+            resolved_index = int(answer) - 1
+        else:
+            ordinal_answer = re.search(r"\b(перва\w*|втора\w*|треть\w*|четверт\w*|пята\w*|шест\w*|седьм\w*|восьм\w*|девят\w*|десят\w*)\b", answer)
+            if ordinal_answer:
+                word = ordinal_answer.group(1)
+                resolved_index = next((index for prefix, index in _APARTMENT_ORDINALS.items() if word.startswith(prefix)), None)
+        previous_user = next((item.get("content", "") for item in reversed(history[:-1]) if item.get("role") == "user"), "")
+        if resolved_index is not None and 0 <= resolved_index < len(state["apartments"]):
+            clarification_values = _extract_apartment_description(previous_user)
+        else:
+            resolved_index = None
+    requested = _requested_apartment_count(text)
+    if requested == 1 and re.search(r"\b(?:первая|первой|первую)\b", normalized):
+        requested = 2
+    multi_cue = requested > 1 or any(word in normalized for word in (
+        "сравни", "сравнить", "обе квартир", "все квартир", "квартир:",
+        "еще одна", "ещё одна", "их стоимость", "несколько квартир",
+        "следующих объектов", "вариант покупки", "жилье сильнее", "жильё сильнее",
+        "из этих квартир", "какая из квартир", "какой из квартир",
+    ))
+    if requested < 2 and multi_cue and any(word in normalized for word in ("обе", "квартиры", "вариант покупки", "жилье сильнее", "жильё сильнее", "из этих квартир")):
+        requested = 2
+    if state and resolved_index is None and not multi_cue and not any(keyword in normalized for keyword in FORECAST_KEYWORDS):
+        if not _extract_parameters(text) and not re.search(r"\b(?:перва|перву|втор|треть|четверт|пята|пятой|пятую|шестая|шестой|восьм|девят|десят)\w*\b", normalized):
+            return None
+    if state and any(word in normalized for word in ("сравни уже", "сравнить уже", "эти квартиры", "перспективнее")) and not _extract_parameters(text):
+        return None
+    if not state and not multi_cue:
+        return None
+
+    operation = "append" if state and any(word in normalized for word in ("добавь", "добавить", "еще квартир", "ещё квартир")) else "replace"
+    replace_markers = ("новый набор", "новые квартир", "другие квартир", "следующие объект", "сравни заново", "с нуля")
+    new_set = bool(re.search(r"\bсравни(?:ть)?\s+(?:\d{1,2}|две|два|три|четыре|пять|шесть|семь)\s+квартир", normalized))
+    active_start = 0
+    if state and operation == "append":
+        apartments = [dict(item) for item in state["apartments"]]
+        active_start = len(apartments)
+        apartments.extend({"client_id": str(uuid4())} for _ in range(max(requested, 1)))
+    elif state and not new_set and not any(marker in normalized for marker in replace_markers):
+        apartments = state["apartments"]
+        operation = state.get("operation", "replace")
+        active_start = int(state.get("active_start", 0))
+    else:
+        count = max(requested, 0)
+        if count < 2 and state:
+            count = len(state.get("apartments", []))
+        if count < 2:
+            return None
+        apartments = [{"client_id": str(uuid4())} for _ in range(count)]
+
+    # Keep prior values when the current turn only supplies a correction.
+    apartments = [dict(item) for item in apartments]
+    if resolved_index is not None and clarification_values:
+        apartments[resolved_index].update(clarification_values)
+    for item in apartments:
+        item.setdefault("client_id", str(uuid4()))
+    count = len(apartments)
+
+    ordinal_pattern = re.compile(r"\b(перва\w*|перву\w*|первой|одна|одной|втор\w*|другая|другой|треть\w*|четверт\w*|пятая|пятой|пятую|шестая|шестой|шестую|восьмая|восьмой|восьмую|девятая|девятой|девятую|десятая|десятой|десятую)\b", re.I)
+    matches = list(ordinal_pattern.finditer(text))
+    generic_segments = _split_apartment_descriptions(text, count) if count > 1 else [text]
+    if "две последние" in normalized and count >= 2:
+        shared = _extract_parameters(text)
+        for item in apartments[-2:]:
+            item.update(shared)
+    if matches:
+        prefix = text[:matches[0].start()]
+        if any(word in _normalize(prefix) for word in ("обе", "все", "кажд", "у каждой", "у всех")):
+            shared = _extract_parameters(prefix)
+            for item in apartments:
+                item.update(shared)
+        for position, match in enumerate(matches):
+            word = _normalize(match.group(1))
+            index = 0 if word.startswith(("одна", "одной")) else 1 if word.startswith(("другая", "другой")) else next((idx for prefix, idx in _APARTMENT_ORDINALS.items() if word.startswith(prefix)), None)
+            if index is None:
+                continue
+            index += active_start
+            if index >= count:
+                continue
+            end = matches[position + 1].start() if position + 1 < len(matches) else len(text)
+            segment = text[match.end():end]
+            apartments[index].update(_extract_apartment_description(segment))
+        tail = text[matches[-1].end():]
+        if any(word in _normalize(tail) for word in ("обе", "все", "кажд", "у каждой", "у всех")):
+            shared = _extract_parameters(tail)
+            for item in apartments:
+                item.update(shared)
+    elif len(generic_segments) >= 2:
+        for index, segment in enumerate(generic_segments[:count]):
+            apartments[index + active_start].update(_extract_apartment_description(segment))
+        common_marker = re.search(r"\b(?:обе|оба|все|кажд\w*|у каждой|у всех)\b", normalized)
+        if common_marker:
+            shared = _extract_parameters(text[common_marker.start():])
+            for item in apartments[active_start:]:
+                item.update(shared)
+    elif count == 1:
+        apartments[0].update(_extract_parameters(text))
+    else:
+        # Common attributes are safe to share only when the user says they apply to all.
+        common = _extract_apartment_description(text)
+        common_words = ("обе", "все", "кажд", "у каждой", "у всех")
+        if any(word in normalized for word in common_words):
+            for item in apartments:
+                item.update(common)
+        elif common and state:
+            incomplete = [
+                index for index, item in enumerate(apartments)
+                if any(key not in item for key in REQUIRED_PARAMS)
+            ]
+            # Descriptions in a multi-apartment dialogue arrive in order unless
+            # the user gives an explicit ordinal; attach unlabelled details to
+            # the next incomplete apartment.
+            if incomplete:
+                apartments[incomplete[0]].update(common)
+        elif common and not state:
+            apartments[0].update(common)
+
+    # Shared forecast horizon is valid for every apartment in the current comparison.
+    horizon = _extract_parameters(text).get("n_years")
+    if horizon is None and state:
+        horizon = state.get("n_years", 5)
+    horizon = horizon or 5
+    for item in apartments:
+        item.setdefault("n_years", horizon)
+
+    next_incomplete = next(
+        ((index, item) for index, item in enumerate(apartments, 1)
+         if any(key not in item for key in REQUIRED_PARAMS)),
+        None,
+    )
+    state_json = json.dumps({"apartments": apartments, "n_years": horizon, "operation": operation, "active_start": active_start}, ensure_ascii=False)
+    state_tag = f"{_STATE_MARKER}{state_json}[[/APARTMENTS_STATE_JSON]]"
+    if next_incomplete:
+        index, item = next_incomplete
+        missing = [PARAM_LABELS[key] for key in REQUIRED_PARAMS if key not in item]
+        missing_text = ", ".join(missing)
+        return f"Уточните параметры {index}-й квартиры: {missing_text}.\n" + state_tag
+
+    selected = apartments[active_start:] if operation == "append" else apartments
+    payload = {"intent": "compare_apartments" if len(selected) > 1 or count > 1 else "predict_apartments", "operation": operation, "apartments": selected}
+    summary = "Параметры квартир собраны. Запускаю прогноз через модель."
+    command = "[[CALCULATE_JSON]]" + json.dumps(payload, ensure_ascii=False) + "[[/CALCULATE_JSON]]"
+    return summary + "\n" + command + "\n" + state_tag
+
+
 def chat(message: str, history: list[dict] | None = None) -> str:
     """Обрабатывает сообщение и необязательную историю диалога."""
     message = message.strip()
@@ -730,6 +1028,10 @@ def chat(message: str, history: list[dict] | None = None) -> str:
             "role": role,
             "content": content[:4000],
         })
+
+    multi_response = _multi_apartment_response(message, messages)
+    if multi_response is not None:
+        return multi_response
 
     # Детерминированно собираем параметры из истории и текущего сообщения.
     # Это гарантирует, что n_years по умолчанию равен 5, а недостающие
