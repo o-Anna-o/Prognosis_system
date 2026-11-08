@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from uuid import UUID, uuid4
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -19,8 +20,13 @@ WEB_APP_DIR = Path(__file__).resolve().parents[3] / "web_app"
 if str(WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(WEB_APP_DIR))
 
-from agent.service import chat as agent_chat  # noqa: E402
-from agent.storage import get_recent_history, init_storage, save_turn  # noqa: E402
+from agent.service import chat as agent_chat, starts_new_forecast  # noqa: E402
+from agent.storage import (  # noqa: E402
+    CONVERSATION_ID,
+    get_recent_history,
+    init_storage,
+    save_turn,
+)
 from agent.tools import configure_predictor, configure_reference_provider  # noqa: E402
 
 
@@ -47,12 +53,25 @@ def chat(request):
     message = message.strip()
     if len(message) > 4000:
         return Response({"error": "Сообщение слишком длинное"}, status=400)
+    raw_conversation_id = payload.get("conversation_id")
     try:
-        init_storage()
-        history = get_recent_history(limit=20)
+        conversation_id = (
+            UUID(str(raw_conversation_id))
+            if raw_conversation_id
+            else CONVERSATION_ID
+        )
+    except (ValueError, TypeError, AttributeError):
+        return Response({"error": "Некорректный идентификатор диалога"}, status=400)
+    try:
+        init_storage(conversation_id)
+        history = get_recent_history(limit=20, conversation_id=conversation_id)
+        if starts_new_forecast(message, history):
+            conversation_id = uuid4()
+            init_storage(conversation_id)
+            history = []
         answer = agent_chat(message, history=history)
-        save_turn(message, answer)
-        return Response({"answer": answer})
+        save_turn(message, answer, conversation_id=conversation_id)
+        return Response({"answer": answer, "conversation_id": str(conversation_id)})
     except ValueError as exc:
         return Response({"error": str(exc)}, status=400)
     except Exception as exc:

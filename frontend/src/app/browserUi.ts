@@ -6,6 +6,7 @@ interface ChatMessage {
 interface AssistantChatResponse {
   answer?: unknown;
   error?: unknown;
+  conversation_id?: unknown;
 }
 
 interface EdaCharts {
@@ -172,6 +173,10 @@ function initializeAssistant(): () => void {
   const assistantMessages = messages;
   const assistantSend = send;
   const assistantError = error;
+  const conversationStorageKey = "prognosis-assistant-conversation-id";
+  const createConversationId = () => crypto.randomUUID();
+  let conversationId = sessionStorage.getItem(conversationStorageKey) || createConversationId();
+  sessionStorage.setItem(conversationStorageKey, conversationId);
   let history: ChatMessage[] = [];
   let controller: AbortController | null = null;
 
@@ -221,7 +226,7 @@ function initializeAssistant(): () => void {
       const response = await fetch("/api/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, history: historyForRequest }),
+        body: JSON.stringify({ message, history: historyForRequest, conversation_id: conversationId }),
         signal: controller.signal,
       });
       const responseText = await response.text();
@@ -233,6 +238,10 @@ function initializeAssistant(): () => void {
         throw new Error(`Сервер вернул некорректный ответ (HTTP ${response.status}). Проверьте терминал backend.`);
       }
       if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : `Ошибка HTTP ${response.status}`);
+      if (typeof data.conversation_id === "string") {
+        conversationId = data.conversation_id;
+        sessionStorage.setItem(conversationStorageKey, conversationId);
+      }
       const answer = data.answer;
       if (typeof answer !== "string" || !answer.trim()) throw new Error("ИИ-помощник вернул пустой ответ.");
 
@@ -272,6 +281,8 @@ function initializeAssistant(): () => void {
     }
   };
   const clearHandler: EventListener = () => {
+    conversationId = createConversationId();
+    sessionStorage.setItem(conversationStorageKey, conversationId);
     history = [];
     assistantMessages.replaceChildren();
     hideError();

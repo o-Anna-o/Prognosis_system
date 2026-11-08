@@ -43,7 +43,7 @@ def _connect():
     )
 
 
-def init_storage():
+def init_storage(conversation_id=CONVERSATION_ID):
     """Создаёт диалог, если он ещё не создан."""
     with _connect() as conn:
         conn.execute(
@@ -52,11 +52,11 @@ def init_storage():
             VALUES (%s)
             ON CONFLICT (id) DO NOTHING
             """,
-            (CONVERSATION_ID,),
+            (conversation_id,),
         )
 
 
-def get_recent_history(limit=20):
+def get_recent_history(limit=20, conversation_id=CONVERSATION_ID):
     """Возвращает последние сообщения в хронологическом порядке."""
     limit = max(1, min(int(limit), 100))
 
@@ -69,7 +69,7 @@ def get_recent_history(limit=20):
             ORDER BY created_at DESC, id DESC
             LIMIT %s
             """,
-            (CONVERSATION_ID, limit),
+            (conversation_id, limit),
         ).fetchall()
 
     rows.reverse()
@@ -110,7 +110,7 @@ def _create_embedding(text):
     return embedding
 
 
-def save_turn(user_text, assistant_text):
+def save_turn(user_text, assistant_text, conversation_id=CONVERSATION_ID):
     """
     Сохраняет очищенные сообщения.
     Персональные данные удаляются до записи в БД и до эмбеддинга.
@@ -126,7 +126,7 @@ def save_turn(user_text, assistant_text):
             VALUES (%s)
             ON CONFLICT (id) DO NOTHING
             """,
-            (CONVERSATION_ID,),
+            (conversation_id,),
         )
 
         user_row = None
@@ -140,7 +140,7 @@ def save_turn(user_text, assistant_text):
                 VALUES (%s, 'user', %s)
                 RETURNING id
                 """,
-                (CONVERSATION_ID, clean_user),
+                (conversation_id, clean_user),
             ).fetchone()
 
         if clean_assistant:
@@ -151,7 +151,7 @@ def save_turn(user_text, assistant_text):
                 VALUES (%s, 'assistant', %s)
                 RETURNING id
                 """,
-                (CONVERSATION_ID, clean_assistant),
+                (conversation_id, clean_assistant),
             ).fetchone()
 
         conn.execute(
@@ -160,7 +160,7 @@ def save_turn(user_text, assistant_text):
             SET updated_at = NOW()
             WHERE id = %s
             """,
-            (CONVERSATION_ID,),
+            (conversation_id,),
         )
 
     combined = "\n".join(
@@ -186,7 +186,7 @@ def save_turn(user_text, assistant_text):
                 VALUES (%s, %s, %s, %s::vector)
                 """,
                 (
-                    CONVERSATION_ID,
+                    conversation_id,
                     assistant_row["id"] if assistant_row else (
                         user_row["id"] if user_row else None
                     ),
@@ -198,7 +198,7 @@ def save_turn(user_text, assistant_text):
         return
 
 
-def search_memory(query, limit=5):
+def search_memory(query, limit=5, conversation_id=CONVERSATION_ID):
     """Находит похожие фрагменты в памяти текущего диалога."""
     clean_query = anonymize(query).strip()
     if not clean_query:
@@ -225,7 +225,7 @@ def search_memory(query, limit=5):
             """,
             (
                 vector_value,
-                CONVERSATION_ID,
+                conversation_id,
                 vector_value,
                 limit,
             ),

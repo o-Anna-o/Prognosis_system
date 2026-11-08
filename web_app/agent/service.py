@@ -532,6 +532,29 @@ def _pending_params_from_history(history: list[dict]) -> list[str]:
     return []
 
 
+def starts_new_forecast(message: str, history: list[dict]) -> bool:
+    """Detect a new forecast request so values from an older apartment cannot carry over."""
+    text = _normalize(message)
+    reset_markers = (
+        "новая квартира",
+        "новую квартиру",
+        "другая квартира",
+        "другую квартиру",
+        "новый прогноз",
+        "другой прогноз",
+        "следующая квартира",
+        "следующий прогноз",
+        "очисти параметры",
+        "начни заново",
+        "с нуля",
+    )
+    if any(marker in text for marker in reset_markers):
+        return True
+
+    has_forecast_intent = any(keyword in text for keyword in FORECAST_KEYWORDS)
+    return has_forecast_intent and not _pending_params_from_history(history)
+
+
 def _is_forecast_context(message: str, history: list[dict],
                          params: dict[str, Any],
                          current: dict[str, Any]) -> bool:

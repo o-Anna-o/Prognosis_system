@@ -132,7 +132,7 @@ function IndividualChart({ result, title, order }: { result: PredictionResult; t
 
 export function ApartmentWorkspace() {
   const { apartments } = useApartmentsState();
-  const { addApartment, removeApartment, updateApartmentParameters, setApartmentPrediction, clearApartmentPrediction, setApartmentPredictions, setApartmentError, startApartmentPrediction, cancelApartmentPrediction, resetApartments, toggleApartmentCollapsed, setApartmentsCollapsed } = useApartmentsActions();
+  const { addApartment, replaceApartmentsFromAssistant, removeApartment, updateApartmentParameters, setApartmentPrediction, clearApartmentPrediction, setApartmentPredictions, setApartmentError, startApartmentPrediction, cancelApartmentPrediction, resetApartments, toggleApartmentCollapsed, setApartmentsCollapsed } = useApartmentsActions();
   const referenceQuery = useQuery({
     queryKey: ["reference"],
     queryFn: ({ signal }) => getReference(signal),
@@ -299,9 +299,7 @@ export function ApartmentWorkspace() {
         year_build: textValue("year_build"),
         floor: textValue("floor"),
         area: textValue("area"),
-        n_years: apartmentsRef.current.length > 1
-          ? String(first.parameters.n_years ?? "")
-          : textValue("n_years"),
+        n_years: textValue("n_years"),
       };
       const errors = validateApartment(candidate, reference);
       const firstError = Object.entries(errors)[0];
@@ -311,22 +309,17 @@ export function ApartmentWorkspace() {
         return;
       }
 
-      const signature = parameterSignature([{ id: first.id, parameters: candidate }]);
-      const unchanged = parameterSignature([first]) === signature;
       invalidatePending();
+      pendingAssistantPrediction.current = null;
       window.dispatchEvent(new Event("prognosis:show-forecast"));
-      setActiveResultId(first.id);
-      clearApartmentPrediction(first.id);
-      if (unchanged) {
-        void predictRef.current(first.id);
-      } else {
-        pendingAssistantPrediction.current = { id: first.id, signature };
-        updateApartmentParameters(first.id, candidate);
-      }
+      const id = replaceApartmentsFromAssistant(candidate);
+      pendingAssistantPrediction.current = { id, signature: parameterSignature([{ id, parameters: candidate }]) };
+      setComparisonSnapshot(null);
+      setActiveResultId(id);
     };
     window.addEventListener("prognosis:assistant-calculation", handleAssistantCalculation);
     return () => window.removeEventListener("prognosis:assistant-calculation", handleAssistantCalculation);
-  }, [clearApartmentPrediction, referenceQuery.data, updateApartmentParameters]);
+  }, [referenceQuery.data, replaceApartmentsFromAssistant]);
 
   if (!referenceQuery.data) return <section className="card" role="status">Модель и справочники загружаются…</section>;
   return <>
