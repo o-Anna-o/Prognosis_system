@@ -270,6 +270,11 @@ WALL_MATERIAL_ALIASES = {
 CATEGORICAL_COLS = ["region", "district", "street", "wall_material_code"]
 NUMERIC_COLS = ["year_build", "floor", "area"]
 FEATURE_COLS = CATEGORICAL_COLS + NUMERIC_COLS + ["period_year"]
+MIN_DEALS_FOR_INFLATION = 30
+MIN_INFLATION_PCT = 7.0
+MAX_INFLATION_PCT = 15.0
+INFLATION_CONVERGENCE = 0.15
+MIN_INFLATION_STEP_PP = 0.2
 
 
 
@@ -356,6 +361,67 @@ def region_price_coef_from(data: pd.DataFrame) -> pd.Series:
 
 
 # Инфляция
+
+def compute_annual_market(infl_raw: pd.DataFrame) -> pd.DataFrame:
+    """Estimate annual price inflation from robust median price per square metre."""
+    data = infl_raw.copy()
+    data["period_start_date"] = pd.to_datetime(
+        data["period_start_date"], errors="coerce", dayfirst=True
+    )
+    data["period_year"] = data["period_start_date"].dt.year
+    data["price"] = clean_numeric(data["price"])
+    data["area"] = clean_numeric(data["area"])
+    data = data.loc[
+        data["price"].gt(0) & data["area"].gt(0)
+    ].copy()
+    data["price_per_sqm"] = data["price"] / data["area"]
+    data = data.replace([np.inf, -np.inf], np.nan).dropna(
+        subset=["period_year", "price", "price_per_sqm"]
+    )
+
+    # Apply the same sequential 3-sigma filter used for the model training data.
+    for column in ["price", "price_per_sqm"]:
+        mean = data[column].mean()
+        std = data[column].std()
+        if pd.notna(std) and std > 0:
+            data = data.loc[
+                data[column].between(mean - 3 * std, mean + 3 * std)
+            ].copy()
+
+    annual_market = (
+        data.groupby("period_year")
+        .agg(
+            median_price_per_sqm=("price_per_sqm", "median"),
+            deals=("price_per_sqm", "size"),
+        )
+        .reset_index()
+        .sort_values("period_year")
+        .reset_index(drop=True)
+    )
+    if annual_market.empty:
+        raise ValueError("Для расчёта инфляции не осталось корректных сделок.")
+
+    annual_market["inflation_pct"] = annual_market["median_price_per_sqm"].pct_change() * 100
+    previous_deals = annual_market["deals"].shift(1)
+    unreliable = (
+        annual_market["deals"].lt(MIN_DEALS_FOR_INFLATION)
+        | previous_deals.lt(MIN_DEALS_FOR_INFLATION)
+    )
+    reliable = annual_market.loc[~unreliable, "inflation_pct"].dropna()
+    average_inflation = float(reliable.median()) if not reliable.empty else MIN_INFLATION_PCT
+
+    annual_market.loc[unreliable, "inflation_pct"] = average_inflation
+    # The first year has no preceding comparison year, so keep it at zero after clipping.
+    annual_market["inflation_pct"] = annual_market["inflation_pct"].clip(
+        lower=MIN_INFLATION_PCT
+    )
+    annual_market.loc[annual_market.index[0], "inflation_pct"] = 0.0
+    annual_market["inflation_pct"] = annual_market["inflation_pct"].round(1)
+    annual_market.attrs["avg_inflation_level"] = max(
+        MIN_INFLATION_PCT, average_inflation
+    )
+    return annual_market
+
 
 TIME_CENTER = 2024.5
 MIN_STREET_TOTAL, MIN_STREET_PER_YEAR = 20, 5
@@ -498,7 +564,7 @@ def _prepare_model_data(df: pd.DataFrame) -> pd.DataFrame:
 class PrognosisModel:
     """Адаптер сохранённого bundle из ноутбука к API приложения."""
 
-    def __init__(self, bundle: dict, model_df: pd.DataFrame):
+    def __init__(self, bundle: dict, model_df: pd.DataFrame, annual_market: pd.DataFrame):
         required = {"price_model", "trend_model", "base_year"}
         missing = required.difference(bundle)
         if missing:
@@ -508,9 +574,12 @@ class PrognosisModel:
         self.trend_model = bundle["trend_model"]
         self.selected_model = bundle.get("selected_model", "CatBoost")
         self.model_df = model_df
+        self.annual_market = annual_market
         self.base_year = int(bundle["base_year"])
         self.region_price_coef = region_price_coef_from(model_df)
-        self.avg_inflation_level = 0.0
+        self.avg_inflation_level = float(
+            annual_market.attrs.get("avg_inflation_level", MIN_INFLATION_PCT)
+        )
 
     def _apartment_row(self, apartment: dict, year: int) -> pd.DataFrame:
         row = {col: normalize_text(apartment[col]) for col in CATEGORICAL_COLS}
@@ -524,10 +593,36 @@ class PrognosisModel:
 
     def forecast(self, apartment: dict, n_years: int) -> dict:
         years = list(range(self.base_year, self.base_year + int(n_years) + 1))
-        prices = [float(self.trend_model.predict(self._apartment_row(apartment, year))[0]) for year in years]
-        if not np.isfinite(prices).all() or any(price <= 0 for price in prices):
+        model_prices = [
+            float(self.trend_model.predict(self._apartment_row(apartment, year))[0])
+            for year in years[:2]
+        ]
+        if not np.isfinite(model_prices).all() or any(price <= 0 for price in model_prices):
             raise ValueError("Модель вернула некорректную последовательность цен.")
-        annual_growth = [0.0] + [(prices[i] / prices[i - 1] - 1) * 100 for i in range(1, len(prices))]
+        prices = [model_prices[0], model_prices[1]]
+        first_growth = (model_prices[1] / model_prices[0] - 1) * 100
+        annual_growth = [0.0, first_growth]
+
+        # Keep the first annual change from the notebook's apartment-specific
+        # Ridge forecast, then let it converge gradually to the observed market
+        # inflation level. This makes the rate dynamic without reapplying Ridge's
+        # general time trend on top of market inflation.
+        target_growth = float(
+            np.clip(self.avg_inflation_level, MIN_INFLATION_PCT, MAX_INFLATION_PCT)
+        )
+        current_growth = first_growth
+        for _year in years[2:]:
+            difference = current_growth - target_growth
+            if abs(difference) <= 1e-12:
+                current_growth = target_growth
+            else:
+                step = min(
+                    max(abs(difference) * INFLATION_CONVERGENCE, MIN_INFLATION_STEP_PP),
+                    abs(difference),
+                )
+                current_growth -= np.copysign(step, difference)
+            annual_growth.append(float(current_growth))
+            prices.append(prices[-1] * (1 + current_growth / 100.0))
         forecast_df = pd.DataFrame({
             "Год": years,
             "Прогноз цены, млн руб.": [round(price / 1_000_000, 2) for price in prices],
@@ -559,7 +654,8 @@ def train_model() -> PrognosisModel:
     if model_df.empty or model_df["period_year"].max() < 2026:
         raise ValueError("Для модели нужны очищенные сделки за 2026 год.")
     bundle = joblib.load(MODEL_BUNDLE_PATH)
-    return PrognosisModel(bundle, model_df)
+    annual_market = compute_annual_market(df_raw)
+    return PrognosisModel(bundle, model_df, annual_market)
 
 
 
