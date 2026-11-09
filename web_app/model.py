@@ -486,7 +486,7 @@ def record_features(row, support, with_time: bool = True, trend_scale: float = 1
 
 
 class ApartmentEstimator(RegressorMixin, BaseEstimator):
-    """Sklearn-compatible estimator used by Prognosis_model_comparison.ipynb."""
+    """Sklearn estimator interface for the persisted price models."""
 
     def __init__(self, kind="ridge_time", alpha=100.0, trend_scale=1.0,
                  max_iter=180, max_leaf_nodes=31, min_samples_leaf=40,
@@ -526,8 +526,8 @@ class ApartmentEstimator(RegressorMixin, BaseEstimator):
         return prices
 
 
-# В ноутбуке класс был сохранён как __main__.ApartmentEstimator. Регистрируем
-# совместимый класс перед загрузкой joblib, сохраняя сам артефакт модели.
+# The serialized estimator identifies this class as __main__.ApartmentEstimator.
+# Register it before loading the model bundle.
 setattr(sys.modules["__main__"], "ApartmentEstimator", ApartmentEstimator)
 
 MODEL_BUNDLE_PATH = BASE_DIR / "Prognosis_model_comparison.joblib"
@@ -562,7 +562,7 @@ def _prepare_model_data(df: pd.DataFrame) -> pd.DataFrame:
 
 
 class PrognosisModel:
-    """Адаптер сохранённого bundle из ноутбука к API приложения."""
+    """Adapter from the trained model bundle to the forecasting API."""
 
     def __init__(self, bundle: dict, model_df: pd.DataFrame, annual_market: pd.DataFrame):
         required = {"price_model", "trend_model", "base_year"}
@@ -603,10 +603,8 @@ class PrognosisModel:
         first_growth = (model_prices[1] / model_prices[0] - 1) * 100
         annual_growth = [0.0, first_growth]
 
-        # Keep the first annual change from the notebook's apartment-specific
-        # Ridge forecast, then let it converge gradually to the observed market
-        # inflation level. This makes the rate dynamic without reapplying Ridge's
-        # general time trend on top of market inflation.
+        # Preserve the apartment-specific first-year growth, then converge future
+        # yearly rates toward the observed market inflation level.
         target_growth = float(
             np.clip(self.avg_inflation_level, MIN_INFLATION_PCT, MAX_INFLATION_PCT)
         )
@@ -645,7 +643,7 @@ class PrognosisModel:
 
 
 def train_model() -> PrognosisModel:
-    """Загружает обученные CatBoost и динамическую Ridge из notebook bundle."""
+    """Load the trained CatBoost and dynamic Ridge models from the saved bundle."""
     if not MODEL_BUNDLE_PATH.exists():
         raise FileNotFoundError(f"Файл обученной модели не найден: {MODEL_BUNDLE_PATH}")
     df_raw = read_csv_robust(DATA_PATH)

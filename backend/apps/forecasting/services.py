@@ -20,7 +20,7 @@ _load_error: str | None = None
 class PayloadValidationError(ValueError):
     """Invalid client input, distinct from errors raised by model code."""
 
-# The model module loads the saved notebook bundle.
+# Load the saved model bundle through the model module.
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 WEB_APP_DIR = PROJECT_ROOT / "web_app"
 if str(WEB_APP_DIR) not in sys.path:
@@ -41,7 +41,7 @@ def _ensure_loaded() -> None:
             reference = prognosis_model.load_reference_data()
         except Exception as exc:
             _load_error = str(exc)
-            logger.exception("Failed to load the existing prognosis model")
+            logger.exception("Failed to load the saved prognosis model")
             raise RuntimeError(_load_error) from exc
         _model, _reference = loaded_model, reference
         _load_error = None
