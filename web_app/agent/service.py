@@ -210,16 +210,19 @@ _YEAR_NUMBER_PATTERN = "|".join(
     for word in sorted(_YEAR_NUMBER_WORDS, key=len, reverse=True)
 )
 _YEAR_DURATION_RE = re.compile(
-    rf"(?<!\w)(?P<number>\d{{1,2}}|{_YEAR_NUMBER_PATTERN})"
+    rf"(?<!\w)(?P<number>\d+|{_YEAR_NUMBER_PATTERN})"
     r"\s*-?\s*(?:летн\w*|годичн\w*|лет|год(?:а|ов)?|г\.?)\b"
 )
 _HORIZON_CONTEXT_RE = re.compile(
     r"(?:"
-    r"\bгоризонт(?:а)?(?:\s+прогноз\w*)?(?:\s+(?:на|составит|равен|будет))*"
+    r"\b(?:горизонт\w*|срок\w*|период\w*)(?:\s+прогноз\w*)?"
+    r"(?:\s+(?:на|в|состав\w*|равен\w*|будет|длительностью))*"
     r"|\b(?:прогноз\w*|спрогнозир\w*|предскаж\w*)(?:\s+\w+){0,4}"
-    r"|\b(?:на|через)\s+(?:(?:ближайш\w*|следующ\w*|предстоящ\w*|"
-    r"последующ\w*|будущ\w*|период)\s+){0,3}"
-    r")\s*[,;:]?\s*$"
+    r"|\b(?:на|через)\s+(?:(?:горизонт\w*|срок\w*|период\w*)"
+    r"(?:\s+прогноз\w*)?\s+(?:в\s+)?|(?:ближайш\w*|следующ\w*|"
+    r"предстоящ\w*|последующ\w*|будущ\w*)\s+){0,3}"
+    r"|\bв\s+(?:перспектив\w*|течени\w*|ближайш\w*|следующ\w*)\s+"
+    r")\s*[,;:\-–—=]?\s*$"
 )
 
 
@@ -243,7 +246,7 @@ def _extract_forecast_horizon(text: str) -> int | None:
 
     raw_value = match.group("number")
     value = int(raw_value) if raw_value.isdigit() else _YEAR_NUMBER_WORDS[raw_value]
-    return value if 1 <= value <= 20 else None
+    return value if value >= 1 else None
 
 
 def _fallback_reference() -> dict[str, Any]:
@@ -1009,7 +1012,8 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
         _extract_apartment_description(text)
         or re.search(r"\b(?:перва|перву|втор|треть|четверт|пята|пятой|пятую|шестая|шестой|восьм|девят|десят)\w*\b", normalized)
     )
-    if state and resolved_index is None and not multi_cue and not has_ordinal_or_parameters:
+    requested_horizon = _extract_forecast_horizon(text)
+    if state and resolved_index is None and not multi_cue and not has_ordinal_or_parameters and requested_horizon is None:
         return None
     if state and any(word in normalized for word in ("сравни уже", "сравнить уже", "эти квартиры", "перспективнее")) and not _extract_parameters(text):
         return None
@@ -1130,12 +1134,12 @@ def _multi_apartment_response(message: str, history: list[dict[str, Any]]) -> st
                     for key, value in shared_values.items():
                         item.setdefault(key, value)
     # Shared forecast horizon is valid for every apartment in the current comparison.
-    horizon = _extract_parameters(text).get("n_years")
+    horizon = requested_horizon
     if horizon is None and state:
         horizon = state.get("n_years", 5)
     horizon = horizon or 5
     for item in apartments:
-        item.setdefault("n_years", horizon)
+        item["n_years"] = horizon
 
     reference = get_reference_data() or _fallback_reference()
     region_districts = reference.get("region_districts", {})

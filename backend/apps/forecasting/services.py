@@ -121,8 +121,6 @@ def _validate_payload(data: Any) -> dict:
     horizon = 5 if raw_horizon is None or str(raw_horizon).strip() == "" else _parse_int(
         raw_horizon, "Горизонт прогноза", minimum=1
     )
-    if horizon > 20:
-        raise ValueError("Горизонт прогноза не должен превышать 20 лет.")
     return {
         "region": region,
         "district": district,

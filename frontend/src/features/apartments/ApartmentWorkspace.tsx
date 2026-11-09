@@ -13,7 +13,7 @@ declare global {
 interface ChartConfig {
   type: "line";
   data: { labels: number[]; datasets: { label: string; data: (number | null)[]; borderColor: string; backgroundColor: string; tension: number; pointBackgroundColor: string; pointRadius: number; pointHoverRadius: number; pointStyle: string; borderDash: number[]; borderWidth: number; fill: boolean }[] };
-  options: { responsive: boolean; maintainAspectRatio: boolean; layout: { padding: { top: number } }; interaction: { mode: "nearest"; intersect: boolean }; plugins: { legend: { position: "bottom"; labels: { color: string; usePointStyle: boolean; font: { size: number } } }; tooltip: { callbacks: { label: (context: { dataset: { label: string }; parsed: { y: number }; dataIndex: number }) => string } }; datalabels: { display?: boolean; color?: string; anchor?: "end"; align?: "top"; offset?: number; font?: { size: number; weight: "bold" }; formatter?: (value: number) => string; hover?: { color: string; font: { size: number; weight: "bold" } } } }; scales: { x: { title: { display: boolean; text: string }; ticks: { color: string }; grid: { color: string } }; y: { title: { display: boolean; text: string; color: string }; ticks: { color: string }; grid: { color: string } } } };
+  options: { responsive: boolean; maintainAspectRatio: boolean; layout: { padding: { top: number } }; interaction: { mode: "nearest"; intersect: boolean }; plugins: { legend: { position: "bottom"; labels: { color: string; usePointStyle: boolean; font: { size: number } } }; tooltip: { callbacks: { title?: () => string; label: (context: { dataset: { label: string }; parsed: { y: number }; dataIndex: number }) => string } }; datalabels: { display?: boolean; color?: string; anchor?: "end"; align?: "top"; offset?: number; font?: { size: number; weight: "bold" }; formatter?: (value: number) => string; hover?: { color: string; font: { size: number; weight: "bold" } } } }; scales: { x: { title: { display: boolean; text: string }; ticks: { color: string }; grid: { color: string } }; y: { title: { display: boolean; text: string; color: string }; ticks: { color: string }; grid: { color: string } } } };
 }
 
 const money = (rubles: number) => `${Math.round(rubles).toLocaleString("ru-RU")} ₽`;
@@ -57,14 +57,22 @@ function parameterSignature(apartments: { id: string; parameters: object }[]) {
   return JSON.stringify(apartments.map(({ id, parameters }) => [id, parameters]));
 }
 
-const chartOptions = (label: string, years: number[], showDataLabels = true): ChartConfig["options"] => ({
+const chartOptions = (label: string, years: number[], showDataLabels = true, showTooltipDetails = true): ChartConfig["options"] => ({
   responsive: true,
   maintainAspectRatio: false,
   layout: { padding: { top: 30 } },
   interaction: { mode: "nearest", intersect: false },
   plugins: {
     legend: { position: "bottom", labels: { color: "#0f172a", usePointStyle: true, font: { size: 13 } } },
-    tooltip: { callbacks: { label: (item) => ` ${item.dataset.label}: ${item.parsed.y.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} млн руб. (${years[item.dataIndex]} г.)` } },
+    tooltip: { callbacks: {
+      title: showTooltipDetails ? undefined : () => "",
+      label: (item) => {
+        const price = item.parsed.y.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return showTooltipDetails
+          ? ` ${item.dataset.label}: ${price} млн руб. (${years[item.dataIndex]} г.)`
+          : `${price} млн руб.`;
+      },
+    } },
     datalabels: showDataLabels
       ? { color: label, anchor: "end", align: "top", offset: 6, font: { size: 12, weight: "bold" }, formatter: (value) => value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), hover: { color: "#0f172a", font: { size: 18, weight: "bold" } } }
       : { display: false },
@@ -99,7 +107,7 @@ function ApartmentComparison({ results }: { results: { id: string; order: number
             return { label: item.title, data: comparison.years.map((year) => points.get(year) ?? null), borderColor: visual.color, backgroundColor: visual.color, pointBackgroundColor: visual.color, pointStyle: visual.marker, borderDash: visual.lineDash, tension: 0.25, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5, fill: false };
           }),
         },
-        options: chartOptions("#1a4fa0", comparison.years, false),
+        options: chartOptions("#1a4fa0", comparison.years, false, false),
       });
     }, 100);
     return () => { window.clearInterval(timer); chart?.destroy(); };
@@ -107,6 +115,7 @@ function ApartmentComparison({ results }: { results: { id: string; order: number
 
   if (comparison.rows.length < 2) return <p>Для сравнения недостаточно полных прогнозов.</p>;
   const ranked = [...comparison.rows].sort((a, b) => a.place - b.place || a.order - b.order);
+  const periodYears = Math.max(1, comparison.years.at(-1)! - comparison.years[0]!);
   return <div className="card comparison-container">
     <h2 className="card-title">Сравнительный анализ</h2>
     <p>Общий период: {comparison.years[0]}–{comparison.years.at(-1)} гг.</p>
@@ -124,9 +133,12 @@ function ApartmentComparison({ results }: { results: { id: string; order: number
     </table></div>
     <h3>Общий прогноз</h3><div className="chart-wrap comparison-chart"><canvas ref={canvasRef} /></div>
     <h3>Сравнение потенциала роста квартир</h3>
-    <div className="table-wrap"><table className="forecast-table"><thead><tr><th>Место</th><th>Улица</th><th>Начальная стоимость</th><th>Конечная стоимость</th><th>Прирост</th><th>Рост, %</th></tr></thead><tbody>
+    <div className="table-wrap"><table className="forecast-table"><thead><tr><th>Место</th><th>Улица</th><th>Начальная стоимость</th><th>Конечная стоимость</th><th>Прирост</th><th>Средний % роста в год</th><th>Суммарный прирост, %</th></tr></thead><tbody>
       {ranked.map((row) => {
-        return <tr key={row.id}><td>{row.place}</td><td><span className="apartment-color-key" style={{ backgroundColor: apartmentVisual(row.order).color }} />{row.title}</td><td>{moneyMln(row.startPrice)}</td><td>{moneyMln(row.endPrice)}</td><td>{moneyMln(row.change)}</td><td>{row.growth.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td></tr>;
+        const annualGrowth = row.startPrice > 0
+          ? (Math.pow(row.endPrice / row.startPrice, 1 / periodYears) - 1) * 100
+          : 0;
+        return <tr key={row.id}><td>{row.place}</td><td><span className="apartment-color-key" style={{ backgroundColor: apartmentVisual(row.order).color }} />{row.title}</td><td>{moneyMln(row.startPrice)}</td><td>{moneyMln(row.endPrice)}</td><td>{moneyMln(row.change)}</td><td>{annualGrowth.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td><td>{row.growth.toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td></tr>;
       })}
     </tbody></table></div>
   </div>;

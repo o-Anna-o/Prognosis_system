@@ -49,9 +49,9 @@ export function validateApartment(
   if (horizonRaw) {
     const horizon = numberValue(horizonRaw);
     if (horizon === null || !Number.isInteger(horizon)) {
-      errors.n_years = "Горизонт должен быть целым числом от 1 до 20.";
-    } else if (horizon < 1 || horizon > 20) {
-      errors.n_years = "Горизонт — от 1 до 20 лет.";
+      errors.n_years = "Горизонт должен быть целым числом не меньше 1.";
+    } else if (horizon < 1) {
+      errors.n_years = "Горизонт должен быть не меньше 1 года.";
     }
   }
 
