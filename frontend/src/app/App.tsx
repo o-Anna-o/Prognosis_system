@@ -153,12 +153,6 @@ export function App() {
           </div>
         </div>
       </main>
-
-      <footer className="site-footer">
-        <div className="container">
-          <p>2026 г</p>
-        </div>
-      </footer>
     </>
   );
 }
