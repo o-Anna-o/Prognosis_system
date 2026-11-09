@@ -530,7 +530,7 @@ class ApartmentEstimator(RegressorMixin, BaseEstimator):
 # Register it before loading the model bundle.
 setattr(sys.modules["__main__"], "ApartmentEstimator", ApartmentEstimator)
 
-MODEL_BUNDLE_PATH = BASE_DIR / "Prognosis_model_comparison.joblib"
+MODEL_BUNDLE_PATH = BASE_DIR / "Prognosis_model.joblib"
 
 
 def _prepare_model_data(df: pd.DataFrame) -> pd.DataFrame:

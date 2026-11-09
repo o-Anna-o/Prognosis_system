@@ -156,7 +156,7 @@ export function App() {
 
       <footer className="site-footer">
         <div className="container">
-          <p>подготовила Агапова Анна, 2026 г</p>
+          <p>2026 г</p>
         </div>
       </footer>
     </>
