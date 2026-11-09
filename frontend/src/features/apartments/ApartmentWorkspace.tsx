@@ -133,7 +133,7 @@ function ApartmentComparison({ results }: { results: { id: string; order: number
     </table></div>
     <h3>Общий прогноз</h3><div className="chart-wrap comparison-chart"><canvas ref={canvasRef} /></div>
     <h3>Сравнение потенциала роста квартир</h3>
-    <div className="table-wrap"><table className="forecast-table"><thead><tr><th>Место</th><th>Улица</th><th>Начальная стоимость</th><th>Конечная стоимость</th><th>Прирост</th><th>Средний % роста в год</th><th>Суммарный прирост, %</th></tr></thead><tbody>
+    <div className="table-wrap"><table className="forecast-table" style={{ textAlign: "center" }}><thead><tr><th>Место</th><th>Улица</th><th>Начальная стоимость</th><th>Конечная стоимость</th><th>Прирост</th><th>Средний % роста в год</th><th>Суммарный прирост, %</th></tr></thead><tbody>
       {ranked.map((row) => {
         const annualGrowth = row.startPrice > 0
           ? (Math.pow(row.endPrice / row.startPrice, 1 / periodYears) - 1) * 100
