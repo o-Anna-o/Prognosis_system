@@ -1,35 +1,28 @@
 
 from __future__ import annotations
 
-import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
-
-warnings.filterwarnings("ignore")
+import re
+import sys
+import joblib
+from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.feature_extraction import DictVectorizer
+from sklearn.linear_model import Ridge
+from sklearn.utils.validation import check_is_fitted
 
 
 # Параметры проекта
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # корень проекта
 DATA_PATH = BASE_DIR / "СДЕЛКИ_Мос_2023-2026.csv"
-INFLATION_DATA_PATH = BASE_DIR / "СДЕЛКИ_Мос_2019-2026.csv"
 
 RANDOM_STATE = 42
 
 # Лучшие параметры модели (определены в блокноте заранее)
-KNOWN_BEST_PARAMS = {
-    "max_leaf_nodes": 63,
-    "max_iter": 150,
-    "learning_rate": 0.08,
-    "l2_regularization": 1.0,
-}
+
 
 # Словарь соответствия кода материала стен его названию
 WALL_MATERIAL_NAMES = {
@@ -271,17 +264,12 @@ WALL_MATERIAL_ALIASES = {
     "камен": "Каменные",
 }
 
-# Параметры инфляции
-MIN_DEALS_FOR_INFLATION = 30   # минимум сделок в году для надёжной медианы
-MIN_INFLATION_PCT = 7.0        # нижняя граница инфляции, % в год
-
-# Ограничение годового темпа роста рынка
-GROWTH_FLOOR, GROWTH_CAP = -0.15, 0.25
+# Минимум сделок для надёжного годового индикатора роста.
 
 # Признаки модели
 CATEGORICAL_COLS = ["region", "district", "street", "wall_material_code"]
-NUMERIC_COLS = ["year_build", "floor", "area", "period_year", "building_age"]
-FEATURE_COLS = CATEGORICAL_COLS + NUMERIC_COLS
+NUMERIC_COLS = ["year_build", "floor", "area"]
+FEATURE_COLS = CATEGORICAL_COLS + NUMERIC_COLS + ["period_year"]
 
 
 
@@ -332,11 +320,10 @@ def clean_data(df_raw: pd.DataFrame) -> pd.DataFrame:
     df = df[(df["area"] > 25) & (df["price"] > 7_000_000)].copy().reset_index(drop=True)
     df = df.dropna(subset=["period_start_date", "price", "area", "year_build", "floor"]).copy()
 
-    current_year = pd.Timestamp.today().year
     valid = (
         (df["price"] > 0) & (df["area"] > 0) & (df["floor"] >= 1) &
-        (df["year_build"].between(1800, current_year + 5)) &
-        (df["period_year"].between(1900, current_year + 1)) &
+        (df["year_build"] >= 1800) &
+        (df["period_year"] >= 1900) &
         (df["year_build"] <= df["period_year"] + 1)
     )
     df = df.loc[valid].copy()
@@ -349,302 +336,236 @@ def clean_data(df_raw: pd.DataFrame) -> pd.DataFrame:
     df["building_age"] = (df["period_year"] - df["year_build"]).clip(lower=0)
     df = df.replace([np.inf, -np.inf], np.nan).reset_index(drop=True)
 
-    # Удаление выбросов по правилу 3 сигм
-    STD_THRESHOLD = 3
-    for col in ["price", "price_per_sqm"]:
-        mean, std = df[col].mean(), df[col].std()
-        lower, upper = mean - STD_THRESHOLD * std, mean + STD_THRESHOLD * std
-        df = df[(df[col] >= lower) & (df[col] <= upper)].copy()
-
     return df.reset_index(drop=True)
 
 
 def region_price_coef_from(data: pd.DataFrame) -> pd.Series:
-    """Коэффициент стоимости по округу: медиана цены за м² в округе / медиана по Москве."""
-    market_median = data["price_per_sqm"].median()
-    if market_median <= 0:
+    """K АО = среднее арифметическое price/area в АО / среднее по Москве."""
+    valid = data.loc[
+        data["price"].gt(0) & data["area"].gt(0), ["region", "price", "area"]
+    ].copy()
+    if valid.empty:
         return pd.Series(dtype=float)
-    coef = data.groupby("region")["price_per_sqm"].median() / market_median
+    valid["price_per_sqm"] = valid["price"] / valid["area"]
+    market_mean = float(valid["price_per_sqm"].mean())
+    if not np.isfinite(market_mean) or market_mean <= 0:
+        return pd.Series(dtype=float)
+    coef = valid.groupby("region")["price_per_sqm"].mean() / market_mean
     return coef.fillna(1.0)
 
 
 
 # Инфляция
 
-def compute_annual_market(infl_raw: pd.DataFrame) -> pd.DataFrame:
-    """Годовая инфляция по медианной цене за м² (price/area)."""
-    infl_raw = infl_raw.copy()
-    infl_raw["period_start_date"] = pd.to_datetime(infl_raw["period_start_date"], errors="coerce", dayfirst=True)
-    infl_raw["period_year"] = infl_raw["period_start_date"].dt.year
-    infl_raw["price"] = pd.to_numeric(infl_raw["price"], errors="coerce")
-    infl_raw["area"] = pd.to_numeric(infl_raw["area"], errors="coerce")
-    infl_raw["price_per_sqm"] = infl_raw["price"] / infl_raw["area"]
-    infl_raw = infl_raw[(infl_raw["price"] > 0) & (infl_raw["area"] > 0)].copy()
+TIME_CENTER = 2024.5
+MIN_STREET_TOTAL, MIN_STREET_PER_YEAR = 20, 5
+MIN_DISTRICT_TOTAL, MIN_DISTRICT_PER_YEAR = 15, 3
 
-    # Удаление выбросов (правило 3 сигм)
+
+def normalize_text(value) -> str:
+    if pd.isna(value) or not str(value).strip():
+        return "_неизвестно_"
+    return re.sub(r"\s+", " ", str(value).strip().lower().replace("ё", "е"))
+
+
+def district_key(row) -> str:
+    return f"{row['region']} | {row['district']}"
+
+
+def street_key(row) -> str:
+    return f"{row['region']} | {row['district']} | {row['street']}"
+
+
+def supported_keys(frame: pd.DataFrame, key_func, minimum_total: int, minimum_year: int) -> set[str]:
+    keys = [key_func(row) for row in frame[CATEGORICAL_COLS].to_dict("records")]
+    counts = pd.crosstab(pd.Series(keys, index=frame.index), frame["period_year"])
+    keep = (counts.sum(axis=1) >= minimum_total) & ((counts >= minimum_year).sum(axis=1) >= 2)
+    return set(counts.index[keep])
+
+
+def make_support(frame: pd.DataFrame) -> dict[str, set[str]]:
+    return {
+        "district_trends": supported_keys(frame, district_key, MIN_DISTRICT_TOTAL, MIN_DISTRICT_PER_YEAR),
+        "street_trends": supported_keys(frame, street_key, MIN_STREET_TOTAL, MIN_STREET_PER_YEAR),
+    }
+
+
+def record_features(row, support, with_time: bool = True, trend_scale: float = 1.0) -> dict[str, float]:
+    region = str(row["region"])
+    wall = str(row["wall_material_code"])
+    district = district_key(row)
+    street = street_key(row)
+    log_area = np.log(float(row["area"]) / 50.0)
+    floor = (float(row["floor"]) - 7) / 12.0
+    build = (float(row["year_build"]) - 1985) / 40.0
+    numeric = {
+        "log_area": log_area, "log_area_sq": log_area ** 2,
+        "floor": floor, "floor_sq": floor ** 2,
+        "build": build, "build_sq": build ** 2,
+    }
+    level = {
+        "region=" + region: 1.0, "district=" + district: 1.0,
+        "street=" + street: 1.0, "wall=" + wall: 1.0, **numeric,
+    }
+    features = {"L:" + key: value for key, value in level.items()}
+    if with_time:
+        slope = {"global": 1.0, "region=" + region: 1.0, "wall=" + wall: 1.0, **numeric}
+        if district in support["district_trends"]:
+            slope["district=" + district] = 1.0
+        if street in support["street_trends"]:
+            slope["street=" + street] = 1.0
+        time_value = (float(row["period_year"]) - TIME_CENTER) * float(trend_scale)
+        features.update({"T:" + key: time_value * value for key, value in slope.items()})
+    return features
+
+
+class ApartmentEstimator(RegressorMixin, BaseEstimator):
+    """Sklearn-compatible estimator used by Prognosis_model_comparison.ipynb."""
+
+    def __init__(self, kind="ridge_time", alpha=100.0, trend_scale=1.0,
+                 max_iter=180, max_leaf_nodes=31, min_samples_leaf=40,
+                 learning_rate=0.07, l2_regularization=0.0,
+                 iterations=240, depth=6, l2_leaf_reg=5.0,
+                 random_strength=1.0, cat_feature_mode="native",
+                 year_weighting="none", random_state=42, thread_count=3):
+        self.kind = kind
+        self.alpha = alpha
+        self.trend_scale = trend_scale
+        self.max_iter = max_iter
+        self.max_leaf_nodes = max_leaf_nodes
+        self.min_samples_leaf = min_samples_leaf
+        self.learning_rate = learning_rate
+        self.l2_regularization = l2_regularization
+        self.iterations = iterations
+        self.depth = depth
+        self.l2_leaf_reg = l2_leaf_reg
+        self.random_strength = random_strength
+        self.cat_feature_mode = cat_feature_mode
+        self.year_weighting = year_weighting
+        self.random_state = random_state
+        self.thread_count = thread_count
+
+    def fit(self, X, y):
+        raise NotImplementedError("Сохранённая модель уже обучена; переобучение в приложении отключено.")
+
+    def predict(self, X):
+        check_is_fitted(self, "is_fitted_")
+        X = X.copy().reset_index(drop=True)
+        records = [record_features(row, self.support_, self.with_time_, self.trend_scale)
+                   for row in X[FEATURE_COLS].to_dict("records")]
+        log_price_per_sqm = self.model_.predict(self.vectorizer_.transform(records))
+        prices = np.exp(log_price_per_sqm) * X["area"].to_numpy(dtype=float)
+        if not np.isfinite(prices).all():
+            raise ValueError("Модель вернула некорректную цену квартиры.")
+        return prices
+
+
+# В ноутбуке класс был сохранён как __main__.ApartmentEstimator. Регистрируем
+# совместимый класс перед загрузкой joblib, сохраняя сам артефакт модели.
+setattr(sys.modules["__main__"], "ApartmentEstimator", ApartmentEstimator)
+
+MODEL_BUNDLE_PATH = BASE_DIR / "Prognosis_model_comparison.joblib"
+
+
+def _prepare_model_data(df: pd.DataFrame) -> pd.DataFrame:
+    model_source = df.copy()
+    model_source["price_per_sqm"] = model_source["price"] / model_source["area"]
     for col in ["price", "price_per_sqm"]:
-        m, s = infl_raw[col].mean(), infl_raw[col].std()
-        infl_raw = infl_raw[(infl_raw[col] >= m - 3 * s) & (infl_raw[col] <= m + 3 * s)]
+        mean, std = model_source[col].mean(), model_source[col].std()
+        model_source = model_source[(model_source[col] >= mean - 3 * std) & (model_source[col] <= mean + 3 * std)].copy()
+    model_df = model_source.copy()
+    model_df["_source_id"] = model_df.index.astype(int)
+    for col in CATEGORICAL_COLS:
+        model_df[col] = model_df[col].map(normalize_text)
+    model_df["wall_material_code"] = model_df["wall_material_code"].str.replace(r"\.0+$", "", regex=True)
+    for col in NUMERIC_COLS + ["price"]:
+        model_df[col] = pd.to_numeric(model_df[col], errors="coerce")
+    model_df = model_df.dropna(subset=NUMERIC_COLS + ["price", "period_year"]).copy()
+    model_df = model_df[
+        model_df["period_year"].between(2023, 2026)
+        & model_df["year_build"].between(1800, 2027)
+        & (model_df["year_build"] <= model_df["period_year"] + 1)
+        & model_df["floor"].between(1, 100)
+        & model_df["area"].between(25, 400)
+        & model_df["price"].between(7_000_000, 1_000_000_000)
+    ].copy()
+    model_df["price_per_sqm"] = model_df["price"] / model_df["area"]
+    model_df = model_df[model_df["price_per_sqm"].between(50_000, 15_000_000)].copy()
+    model_df["period_year"] = model_df["period_year"].astype(int)
+    return model_df.sort_values("period_start_date").reset_index(drop=True)
 
-    annual_market = (infl_raw.groupby("period_year")
-                     .agg(median_price_per_sqm=("price_per_sqm", "median"),
-                          deals=("price_per_sqm", "size"))
-                     .reset_index().sort_values("period_year"))
-
-    annual_market["inflation_pct"] = annual_market["median_price_per_sqm"].pct_change() * 100
-
-    # Годы с малым числом сделок дают ненадёжную медиану — заменяем средним уровнем
-    prev_deals = annual_market["deals"].shift(1)
-    unreliable = (annual_market["deals"] < MIN_DEALS_FOR_INFLATION) | (prev_deals < MIN_DEALS_FOR_INFLATION)
-    reliable_inflation = annual_market.loc[~unreliable, "inflation_pct"].dropna()
-    avg_inflation_level = float(reliable_inflation.median()) if len(reliable_inflation) else 0.0
-
-    annual_market.loc[unreliable, "inflation_pct"] = avg_inflation_level
-    annual_market.loc[annual_market["period_year"] == annual_market["period_year"].min(), "inflation_pct"] = 0.0
-
-    annual_market["inflation_pct"] = annual_market["inflation_pct"].clip(lower=MIN_INFLATION_PCT)
-    annual_market["inflation_pct"] = annual_market["inflation_pct"].round(1)
-    return annual_market
-
-
-def forecast_inflation_pct(annual_market: pd.DataFrame, n_years: int,
-                           floor_pct: float = 7.0, cap_pct: float = 15.0,
-                           convergence: float = 0.15, min_step_pp: float = 0.2):
-    """Прогноз инфляции на n_years лет.
-
-    Последняя известная инфляция плавно сходится к целевому уровню —
-    медиане последних 3 надёжных лет. Результат ограничен [floor_pct; cap_pct].
-    """
-    hist = annual_market.dropna(subset=["inflation_pct"]).copy()
-    if len(hist) < 1:
-        return [], []
-    last_year = int(hist["period_year"].iloc[-1])
-    last_inflation = float(hist["inflation_pct"].iloc[-1])
-    target = float(hist["inflation_pct"].tail(3).median())
-
-    years = list(range(last_year + 1, last_year + int(n_years) + 1))
-    inflations = []
-    current = last_inflation
-    for _ in years:
-        step = (current - target) * convergence
-        if current > target and step < min_step_pp:
-            step = min_step_pp
-        current = current - step
-        current = float(np.clip(current, floor_pct, cap_pct))
-        inflations.append(current)
-    return years, inflations
-
-
-
-# Обучение модели
 
 class PrognosisModel:
-    """Обученная модель прогнозирования стоимости квартир."""
+    """Адаптер сохранённого bundle из ноутбука к API приложения."""
 
-    def __init__(self, model, preprocessor, region_price_coef: pd.Series,
-                 annual_market: pd.DataFrame, model_df: pd.DataFrame,
-                 avg_inflation_level: float):
-        self.model = model
-        self.preprocessor = preprocessor
-        self.region_price_coef = region_price_coef
-        self.annual_market = annual_market
+    def __init__(self, bundle: dict, model_df: pd.DataFrame):
+        required = {"price_model", "trend_model", "base_year"}
+        missing = required.difference(bundle)
+        if missing:
+            raise ValueError(f"В файле модели отсутствуют обязательные поля: {sorted(missing)}")
+        self.bundle = bundle
+        self.price_model = bundle["price_model"]
+        self.trend_model = bundle["trend_model"]
+        self.selected_model = bundle.get("selected_model", "CatBoost")
         self.model_df = model_df
-        self.avg_inflation_level = avg_inflation_level
-        self.base_year = int(model_df["period_year"].max())
+        self.base_year = int(bundle["base_year"])
+        self.region_price_coef = region_price_coef_from(model_df)
+        self.avg_inflation_level = 0.0
 
-    def _district_for_model(self, region: str, district: str) -> str:
-        """Подбирает написание района, которое чаще всего встречается в данных.
-
-        В датасете один и тот же район может быть записан по-разному
-        («Филевский Парк» и «Филевский парк», «Сосенское» и
-        «поселение Сосенское»). Берём вариант с наибольшим числом сделок,
-        чтобы модель опиралась на более полные данные.
-        """
-        candidates = [district] + DISTRICT_DATASET_ALIASES.get(district, [])
-        best_name = district
-        best_rows = 0
-        for candidate in candidates:
-            rows = self.model_df[
-                (self.model_df["region"] == region)
-                & (self.model_df["district"] == candidate)
-            ]
-            if len(rows) > best_rows:
-                best_name, best_rows = candidate, len(rows)
-        return best_name
-
-    def predict_base_price(self, apartment: dict) -> float:
-        """Базовая оценка квартиры моделью с учётом коэффициента округа."""
-        year_build = int(apartment["year_build"])
-        region = str(apartment["region"])
-        row = {
-            "region": region,
-            "district": self._district_for_model(
-                region, str(apartment["district"])
-            ),
-            "street": str(apartment["street"]),
-            "wall_material_code": str(apartment["wall_material_code"]),
-            "year_build": year_build,
-            "floor": int(apartment["floor"]),
-            "area": float(apartment["area"]),
-            "period_year": self.base_year,
-            "building_age": max(0, self.base_year - year_build),
-        }
-        X_new = pd.DataFrame([row])[FEATURE_COLS]
-        base_price = float(np.maximum(0.0, np.expm1(self.model.predict(X_new)))[0])
-        coef_region = float(self.region_price_coef.get(str(apartment["region"]), 1.0))
-        return base_price * coef_region, coef_region
+    def _apartment_row(self, apartment: dict, year: int) -> pd.DataFrame:
+        row = {col: normalize_text(apartment[col]) for col in CATEGORICAL_COLS}
+        row["wall_material_code"] = re.sub(r"\.0+$", "", row["wall_material_code"])
+        row.update({col: float(apartment[col]) for col in NUMERIC_COLS})
+        row["period_year"] = int(year)
+        if not (25 <= row["area"] <= 400 and 1 <= row["floor"] <= 100
+                and 1800 <= row["year_build"] <= year + 1):
+            raise ValueError("Параметры квартиры выходят за границы обучающей выборки модели.")
+        return pd.DataFrame([row])[FEATURE_COLS]
 
     def forecast(self, apartment: dict, n_years: int) -> dict:
-        """Прогноз цены квартиры на n_years лет.
-
-        Возвращает словарь с таблицей прогноза и служебной информацией.
-        """
-        base_price, coef_region = self.predict_base_price(apartment)
-
-        infl_years, infl_values = forecast_inflation_pct(self.annual_market, n_years)
-
-        years = [self.base_year] + list(infl_years)
-        prices = [base_price]
-        for inf in infl_values:
-            prices.append(prices[-1] * (1.0 + inf / 100.0))
-
+        years = list(range(self.base_year, self.base_year + int(n_years) + 1))
+        prices = [float(self.trend_model.predict(self._apartment_row(apartment, year))[0]) for year in years]
+        if not np.isfinite(prices).all() or any(price <= 0 for price in prices):
+            raise ValueError("Модель вернула некорректную последовательность цен.")
+        annual_growth = [0.0] + [(prices[i] / prices[i - 1] - 1) * 100 for i in range(1, len(prices))]
         forecast_df = pd.DataFrame({
             "Год": years,
-            "Прогноз цены, млн руб.": [round(p / 1e6, 2) for p in prices],
-            "Инфляция, %": pd.Series([0.0] + [round(i, 1) for i in infl_values]),
+            "Прогноз цены, млн руб.": [round(price / 1_000_000, 2) for price in prices],
+            "Инфляция, %": [round(value, 1) for value in annual_growth],
         })
-
         return {
             "forecast": forecast_df,
             "forecast_exact": [
-                {"year": int(year), "price_mln": float(price / 1e6), "inflation_pct": float(inflation)}
-                for year, price, inflation in zip(years, prices, [0.0] + list(infl_values))
+                {"year": year, "price_mln": price / 1_000_000, "inflation_pct": growth}
+                for year, price, growth in zip(years, prices, annual_growth)
             ],
-            "base_price": base_price,
-            "coef_region": coef_region,
+            "base_price": prices[0],
+            "coef_region": float(self.region_price_coef.get(normalize_text(apartment["region"]), 1.0)),
+            "growth_source": "динамическая Ridge-модель",
             "base_year": self.base_year,
             "avg_inflation_level": self.avg_inflation_level,
-            "infl_first": infl_values[0] if infl_values else None,
-            "infl_last": infl_values[-1] if infl_values else None,
+            "infl_first": annual_growth[1] if len(annual_growth) > 1 else None,
+            "infl_last": annual_growth[-1] if len(annual_growth) > 1 else None,
         }
 
 
 def train_model() -> PrognosisModel:
-    """Полное обучение модели на всех доступных данных (как в блокноте)."""
-    # 1. Основной датасет
+    """Загружает обученные CatBoost и динамическую Ridge из notebook bundle."""
+    if not MODEL_BUNDLE_PATH.exists():
+        raise FileNotFoundError(f"Файл обученной модели не найден: {MODEL_BUNDLE_PATH}")
     df_raw = read_csv_robust(DATA_PATH)
     df_raw.columns = df_raw.columns.astype(str).str.strip().str.lower()
-    expected_cols = ["region", "district", "street", "wall_material_code",
-                     "year_build", "floor", "area", "period_start_date", "price"]
-    missing = [c for c in expected_cols if c not in df_raw.columns]
-    if missing:
-        raise ValueError(f"Не найдены колонки {missing}. В файле есть: {df_raw.columns.tolist()}")
+    model_df = _prepare_model_data(clean_data(df_raw))
+    if model_df.empty or model_df["period_year"].max() < 2026:
+        raise ValueError("Для модели нужны очищенные сделки за 2026 год.")
+    bundle = joblib.load(MODEL_BUNDLE_PATH)
+    return PrognosisModel(bundle, model_df)
 
-    df = clean_data(df_raw)
-    model_source = df.copy()
-
-    # 2. Коэффициент стоимости по округу (по данным < 2026)
-    region_price_coef = region_price_coef_from(model_source[model_source["period_year"] < 2026])
-
-    # 3. Подготовка признаков
-    model_df = model_source.copy()
-    for col in CATEGORICAL_COLS:
-        model_df[col] = model_df[col].astype("string").fillna("Неизвестно").astype(str)
-    model_df = model_df.dropna(subset=["price", "period_year", "area"]).sort_values("period_start_date").reset_index(drop=True)
-
-    try:
-        onehot = OneHotEncoder(handle_unknown="ignore", min_frequency=2, sparse_output=False)
-    except TypeError:
-        onehot = OneHotEncoder(handle_unknown="ignore", min_frequency=2, sparse=False)
-
-    preprocessor = ColumnTransformer([
-        ("cat", Pipeline([("imputer", SimpleImputer(strategy="most_frequent")),
-                          ("onehot", onehot)]), CATEGORICAL_COLS),
-        ("num", Pipeline([("imputer", SimpleImputer(strategy="median"))]), NUMERIC_COLS)
-    ], remainder="drop")
-
-    # 4. Финальное обучение на всех строках (log1p цены)
-    X = model_df[FEATURE_COLS]
-    y = np.log1p(model_df["price"].astype(float))
-    model = Pipeline([
-        ("prep", preprocessor),
-        ("model", HistGradientBoostingRegressor(
-            max_leaf_nodes=KNOWN_BEST_PARAMS["max_leaf_nodes"],
-            max_iter=KNOWN_BEST_PARAMS["max_iter"],
-            learning_rate=KNOWN_BEST_PARAMS["learning_rate"],
-            l2_regularization=KNOWN_BEST_PARAMS["l2_regularization"],
-            random_state=RANDOM_STATE,
-        )),
-    ])
-    model.fit(X, y)
-
-    # 5. Инфляция по полному датасету 2019-2026
-    infl_raw = read_csv_robust(INFLATION_DATA_PATH)
-    annual_market = compute_annual_market(infl_raw)
-
-    # Средний уровень инфляции по надёжным годам (после нижней границы)
-    prev_deals = annual_market["deals"].shift(1)
-    unreliable = (annual_market["deals"] < MIN_DEALS_FOR_INFLATION) | (prev_deals < MIN_DEALS_FOR_INFLATION)
-    avg_inflation_level = float(annual_market.loc[~unreliable, "inflation_pct"].median())
-
-    return PrognosisModel(
-        model=model,
-        preprocessor=preprocessor,
-        region_price_coef=region_price_coef,
-        annual_market=annual_market,
-        model_df=model_df,
-        avg_inflation_level=avg_inflation_level,
-    )
-
-
-
-# Кэширование обученной модели на диск.
-# Обучение занимает ~2 минуты, поэтому при каждом перезапуске сервера
-# переобучаться не нужно, если данные и код модели не менялись.
-
-MODEL_CACHE_PATH = BASE_DIR / "web_app" / "model_cache.joblib"
-
-
-def _data_signature() -> dict:
-    """Сигнатура входных данных и кода модели (mtime + размер файлов).
-
-    Если любой из файлов изменился — кэш считается устаревшим.
-    """
-    sig: dict = {}
-    for path in (DATA_PATH, INFLATION_DATA_PATH, Path(__file__)):
-        if path.exists():
-            st = path.stat()
-            sig[str(path)] = (st.st_mtime, st.st_size)
-    return sig
 
 
 def train_model_cached() -> PrognosisModel:
-    """Обучение модели с кэшированием результата на диск.
-
-    Если данные и код модели не менялись, а кэш существует — модель
-    загружается мгновенно. Иначе — обучается заново и сохраняется в кэш.
-    """
-    import joblib
-
-    signature = _data_signature()
-    if MODEL_CACHE_PATH.exists():
-        try:
-            payload = joblib.load(MODEL_CACHE_PATH)
-            if payload.get("signature") == signature:
-                return payload["model"]
-        except Exception:  # noqa: BLE001
-            pass  # повреждённый кэш — просто переобучим
-
-    model = train_model()
-    try:
-        joblib.dump({"signature": signature, "model": model}, MODEL_CACHE_PATH)
-    except Exception:  # noqa: BLE001
-        pass  # не удалось сохранить кэш — не критично
-    return model
-
-
-
-# Справочные данные для формы
+    """Загружает сохранённую обученную модель без переобучения на старой схеме."""
+    return train_model()
 
 def _official_district_streets(df_raw: pd.DataFrame, region: str,
                                district: str) -> list[str]:

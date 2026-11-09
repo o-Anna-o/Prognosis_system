@@ -1,4 +1,4 @@
-"""Django adapter for the existing prognosis model."""
+"""Django adapter for the saved comparison-model bundle."""
 
 from __future__ import annotations
 
@@ -20,8 +20,7 @@ _load_error: str | None = None
 class PayloadValidationError(ValueError):
     """Invalid client input, distinct from errors raised by model code."""
 
-# Import the existing model module under its original name. The cached model
-# artifact refers to that module path, so keep it stable during the migration.
+# The model module loads the saved notebook bundle.
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 WEB_APP_DIR = PROJECT_ROOT / "web_app"
 if str(WEB_APP_DIR) not in sys.path:

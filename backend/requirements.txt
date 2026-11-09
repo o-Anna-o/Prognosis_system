@@ -9,3 +9,4 @@ matplotlib>=3.7
 seaborn>=0.13
 langchain
 langchain-ollama
+catboost>=1.2,<2
