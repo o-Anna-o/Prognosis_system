@@ -57,14 +57,14 @@ function startStatusPolling(): () => void {
       if (stopped) return;
       if (response.ok && status.ready) {
         dot.classList.add("hidden");
-        text.textContent = "Модель CatBoost + Ridge";
+        text.textContent = "Модель HistGradientBoosting";
       } else if (status.error) {
         dot.className = "status-dot error";
-        text.textContent = "Ошибка обучения модели";
+        text.textContent = "Ошибка загрузки модели";
         console.error(status.error);
       } else {
         dot.className = "status-dot loading";
-        text.textContent = "Модель обучается…";
+        text.textContent = "Модель HistGradientBoosting загружается…";
         timer = window.setTimeout(() => void check(), 3000);
       }
     } catch (error) {

@@ -44,7 +44,7 @@ DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
 Откройте второе окно PowerShell:
 
 ```powershell
-cd путь\к\Prognosis_system\frontend
+cd frontend
 npm install
 npm run dev
 ```
@@ -73,6 +73,6 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 В корне проекта должны находиться:
 
 - `СДЕЛКИ_Мос_2023-2026.csv` — исходные данные.
-- `Prognosis_model_comparison.joblib` — сохранённая обученная модель.
+- `Prognosis_HistGradientBoosting.joblib` — сохранённая модель HistGradientBoosting из ноутбука `Prognosis_HistGradientBoosting.ipynb`.
 
-Они используются backend при расчёте прогноза. Не перемещайте их из корня проекта. Файл `Prognosis_model_comparison.ipynb` — ноутбук с исследованием и сравнением моделей; для запуска веб-приложения он не нужен
+Они используются backend при расчёте прогноза. Не перемещайте их из корня проекта. Поправка на инфляцию рассчитывается backend отдельно от модели и применяется после прогноза базовой цены.

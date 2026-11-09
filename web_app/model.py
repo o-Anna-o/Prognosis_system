@@ -9,8 +9,8 @@ import re
 import sys
 import joblib
 from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.feature_extraction import DictVectorizer
-from sklearn.linear_model import Ridge
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.preprocessing import OrdinalEncoder
 from sklearn.utils.validation import check_is_fitted
 
 
@@ -271,10 +271,8 @@ CATEGORICAL_COLS = ["region", "district", "street", "wall_material_code"]
 NUMERIC_COLS = ["year_build", "floor", "area"]
 FEATURE_COLS = CATEGORICAL_COLS + NUMERIC_COLS + ["period_year"]
 MIN_DEALS_FOR_INFLATION = 30
-MIN_INFLATION_PCT = 7.0
+MIN_INFLATION_PCT = 0.0
 MAX_INFLATION_PCT = 15.0
-INFLATION_CONVERGENCE = 0.15
-MIN_INFLATION_STEP_PP = 0.2
 
 
 
@@ -363,7 +361,13 @@ def region_price_coef_from(data: pd.DataFrame) -> pd.Series:
 # Инфляция
 
 def compute_annual_market(infl_raw: pd.DataFrame) -> pd.DataFrame:
-    """Estimate annual price inflation from robust median price per square metre."""
+    """Return annual market inflation and a trend-based rate for the next year."""
+    known_inflation = {
+        2023: 7.42,
+        2024: 9.52,
+        2025: 5.59,
+        2026: 5.04,
+    }
     data = infl_raw.copy()
     data["period_start_date"] = pd.to_datetime(
         data["period_start_date"], errors="coerce", dayfirst=True
@@ -408,24 +412,31 @@ def compute_annual_market(infl_raw: pd.DataFrame) -> pd.DataFrame:
         | previous_deals.lt(MIN_DEALS_FOR_INFLATION)
     )
     reliable = annual_market.loc[~unreliable, "inflation_pct"].dropna()
-    average_inflation = float(reliable.median()) if not reliable.empty else MIN_INFLATION_PCT
+    fallback_rate = float(reliable.median()) if not reliable.empty else float(
+        np.median(list(known_inflation.values()))
+    )
+    annual_market.loc[unreliable, "inflation_pct"] = fallback_rate
 
-    annual_market.loc[unreliable, "inflation_pct"] = average_inflation
-    # The first year has no preceding comparison year, so keep it at zero after clipping.
-    annual_market["inflation_pct"] = annual_market["inflation_pct"].clip(
-        lower=MIN_INFLATION_PCT
-    )
-    annual_market.loc[annual_market.index[0], "inflation_pct"] = 0.0
-    annual_market["inflation_pct"] = annual_market["inflation_pct"].round(1)
-    annual_market.attrs["avg_inflation_level"] = max(
-        MIN_INFLATION_PCT, average_inflation
-    )
+    # Use the supplied annual observations as authoritative rates; the price-per-
+    # square-metre ratio can move with the mix of homes sold and distort inflation.
+    known_rates = annual_market["period_year"].map(known_inflation)
+    has_known_rate = known_rates.notna()
+    annual_market.loc[has_known_rate, "inflation_pct"] = known_rates.loc[has_known_rate]
+    annual_market["inflation_pct"] = annual_market["inflation_pct"].fillna(fallback_rate)
+    annual_market["inflation_pct"] = annual_market["inflation_pct"].clip(lower=0).round(2)
+
+    # The observed series peaked in 2024 and has declined since. A linear trend
+    # across the supplied years estimates the rate for the year after the latest data.
+    trend_years = np.asarray(list(known_inflation), dtype=float)
+    trend_rates = np.asarray(list(known_inflation.values()), dtype=float)
+    slope, intercept = np.polyfit(trend_years, trend_rates, 1)
+    next_year = int(annual_market["period_year"].max()) + 1
+    next_year_inflation = float(intercept + slope * next_year)
+    annual_market.attrs["avg_inflation_level"] = float(np.clip(next_year_inflation, 0, MAX_INFLATION_PCT))
+    annual_market.attrs["inflation_trend_pct_per_year"] = float(slope)
+    annual_market.attrs["inflation_trend_center_year"] = float(trend_years.mean())
+    annual_market.attrs["inflation_trend_center_pct"] = float(trend_rates.mean())
     return annual_market
-
-
-TIME_CENTER = 2024.5
-MIN_STREET_TOTAL, MIN_STREET_PER_YEAR = 20, 5
-MIN_DISTRICT_TOTAL, MIN_DISTRICT_PER_YEAR = 15, 3
 
 
 def normalize_text(value) -> str:
@@ -434,103 +445,90 @@ def normalize_text(value) -> str:
     return re.sub(r"\s+", " ", str(value).strip().lower().replace("ё", "е"))
 
 
-def district_key(row) -> str:
-    return f"{row['region']} | {row['district']}"
+class ApartmentHistGradientBoosting(RegressorMixin, BaseEstimator):
+    """Feature preparation and prediction used by the HGB training notebook."""
 
-
-def street_key(row) -> str:
-    return f"{row['region']} | {row['district']} | {row['street']}"
-
-
-def supported_keys(frame: pd.DataFrame, key_func, minimum_total: int, minimum_year: int) -> set[str]:
-    keys = [key_func(row) for row in frame[CATEGORICAL_COLS].to_dict("records")]
-    counts = pd.crosstab(pd.Series(keys, index=frame.index), frame["period_year"])
-    keep = (counts.sum(axis=1) >= minimum_total) & ((counts >= minimum_year).sum(axis=1) >= 2)
-    return set(counts.index[keep])
-
-
-def make_support(frame: pd.DataFrame) -> dict[str, set[str]]:
-    return {
-        "district_trends": supported_keys(frame, district_key, MIN_DISTRICT_TOTAL, MIN_DISTRICT_PER_YEAR),
-        "street_trends": supported_keys(frame, street_key, MIN_STREET_TOTAL, MIN_STREET_PER_YEAR),
-    }
-
-
-def record_features(row, support, with_time: bool = True, trend_scale: float = 1.0) -> dict[str, float]:
-    region = str(row["region"])
-    wall = str(row["wall_material_code"])
-    district = district_key(row)
-    street = street_key(row)
-    log_area = np.log(float(row["area"]) / 50.0)
-    floor = (float(row["floor"]) - 7) / 12.0
-    build = (float(row["year_build"]) - 1985) / 40.0
-    numeric = {
-        "log_area": log_area, "log_area_sq": log_area ** 2,
-        "floor": floor, "floor_sq": floor ** 2,
-        "build": build, "build_sq": build ** 2,
-    }
-    level = {
-        "region=" + region: 1.0, "district=" + district: 1.0,
-        "street=" + street: 1.0, "wall=" + wall: 1.0, **numeric,
-    }
-    features = {"L:" + key: value for key, value in level.items()}
-    if with_time:
-        slope = {"global": 1.0, "region=" + region: 1.0, "wall=" + wall: 1.0, **numeric}
-        if district in support["district_trends"]:
-            slope["district=" + district] = 1.0
-        if street in support["street_trends"]:
-            slope["street=" + street] = 1.0
-        time_value = (float(row["period_year"]) - TIME_CENTER) * float(trend_scale)
-        features.update({"T:" + key: time_value * value for key, value in slope.items()})
-    return features
-
-
-class ApartmentEstimator(RegressorMixin, BaseEstimator):
-    """Sklearn estimator interface for the persisted price models."""
-
-    def __init__(self, kind="ridge_time", alpha=100.0, trend_scale=1.0,
-                 max_iter=180, max_leaf_nodes=31, min_samples_leaf=40,
-                 learning_rate=0.07, l2_regularization=0.0,
-                 iterations=240, depth=6, l2_leaf_reg=5.0,
-                 random_strength=1.0, cat_feature_mode="native",
-                 year_weighting="none", random_state=42, thread_count=3):
-        self.kind = kind
-        self.alpha = alpha
-        self.trend_scale = trend_scale
+    def __init__(self, max_iter=400, learning_rate=0.07, max_leaf_nodes=31,
+                 min_samples_leaf=40, l2_regularization=0.1,
+                 year_weighting="none", top_streets=200, random_state=42):
         self.max_iter = max_iter
+        self.learning_rate = learning_rate
         self.max_leaf_nodes = max_leaf_nodes
         self.min_samples_leaf = min_samples_leaf
-        self.learning_rate = learning_rate
         self.l2_regularization = l2_regularization
-        self.iterations = iterations
-        self.depth = depth
-        self.l2_leaf_reg = l2_leaf_reg
-        self.random_strength = random_strength
-        self.cat_feature_mode = cat_feature_mode
         self.year_weighting = year_weighting
+        self.top_streets = top_streets
         self.random_state = random_state
-        self.thread_count = thread_count
+
+    def _source_features(self, X):
+        f = X.copy()
+        f["district_geo"] = f["region"].astype(str) + " | " + f["district"].astype(str)
+        f["street_geo"] = f["district_geo"] + " | " + f["street"].astype(str)
+        f["building_age"] = (f["period_year"] - f["year_build"]).clip(lower=0)
+        f["log_area"] = np.log(f["area"].astype(float) / 50.0)
+        cols = ["region", "district_geo", "street_geo", "wall_material_code",
+                "year_build", "floor", "area", "period_year", "building_age", "log_area"]
+        return f[cols].copy()
+
+    def _transform(self, X, fit=False):
+        f = self._source_features(X)
+        cats = ["region", "district_geo", "street_geo", "wall_material_code"]
+        nums = [col for col in f.columns if col not in cats]
+        if fit:
+            limits = {"region": 100, "district_geo": 180,
+                      "street_geo": int(self.top_streets), "wall_material_code": 100}
+            self.allowed_ = {
+                col: set(f[col].astype(str).value_counts().head(limits[col]).index)
+                for col in cats
+            }
+        for col in cats:
+            f[col] = f[col].astype(str).where(f[col].isin(self.allowed_[col]), "_прочее_")
+        if fit:
+            self.encoder_ = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
+            cat_array = self.encoder_.fit_transform(f[cats])
+        else:
+            cat_array = self.encoder_.transform(f[cats])
+        return np.column_stack([cat_array, f[nums].to_numpy(dtype=float)])
 
     def fit(self, X, y):
-        raise NotImplementedError("Сохранённая модель уже обучена; переобучение в приложении отключено.")
+        X = X.reset_index(drop=True).copy()
+        y = np.asarray(y, dtype=float)
+        target = np.log(y / X["area"].to_numpy(dtype=float))
+        matrix = self._transform(X, fit=True)
+        if self.year_weighting == "balanced":
+            counts = X["period_year"].value_counts()
+            weights = X["period_year"].map(
+                lambda yr: len(X) / (len(counts) * counts.loc[yr])
+            ).to_numpy(float)
+        elif self.year_weighting == "none":
+            weights = None
+        else:
+            raise ValueError("Неизвестный режим весов")
+        self.model_ = HistGradientBoostingRegressor(
+            max_iter=int(self.max_iter), learning_rate=float(self.learning_rate),
+            max_leaf_nodes=int(self.max_leaf_nodes), min_samples_leaf=int(self.min_samples_leaf),
+            l2_regularization=float(self.l2_regularization),
+            categorical_features=[True, True, True, True, False, False, False, False, False, False],
+            early_stopping=False, random_state=int(self.random_state),
+        )
+        self.model_.fit(matrix, target, sample_weight=weights)
+        self.is_fitted_ = True
+        return self
 
     def predict(self, X):
         check_is_fitted(self, "is_fitted_")
-        X = X.copy().reset_index(drop=True)
-        records = [record_features(row, self.support_, self.with_time_, self.trend_scale)
-                   for row in X[FEATURE_COLS].to_dict("records")]
-        log_price_per_sqm = self.model_.predict(self.vectorizer_.transform(records))
-        prices = np.exp(log_price_per_sqm) * X["area"].to_numpy(dtype=float)
+        X = X.reset_index(drop=True).copy()
+        log_ppsm = self.model_.predict(self._transform(X, fit=False))
+        prices = np.exp(log_ppsm) * X["area"].to_numpy(dtype=float)
         if not np.isfinite(prices).all():
-            raise ValueError("Модель вернула некорректную цену квартиры.")
+            raise ValueError("Некорректные прогнозы стоимости")
         return prices
 
 
-# The serialized estimator identifies this class as __main__.ApartmentEstimator.
-# Register it before loading the model bundle.
-setattr(sys.modules["__main__"], "ApartmentEstimator", ApartmentEstimator)
+# The notebook's serialized estimator uses __main__.ApartmentHistGradientBoosting.
+setattr(sys.modules["__main__"], "ApartmentHistGradientBoosting", ApartmentHistGradientBoosting)
 
-MODEL_BUNDLE_PATH = BASE_DIR / "Prognosis_model_comparison.joblib"
+MODEL_BUNDLE_PATH = BASE_DIR / "Prognosis_HistGradientBoosting.joblib"
 
 
 def _prepare_model_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -562,20 +560,19 @@ def _prepare_model_data(df: pd.DataFrame) -> pd.DataFrame:
 
 
 class PrognosisModel:
-    """Adapter from the trained model bundle to the forecasting API."""
+    """Adapter from the saved HistGradientBoosting bundle to the forecasting API."""
 
     def __init__(self, bundle: dict, model_df: pd.DataFrame, annual_market: pd.DataFrame):
-        required = {"price_model", "trend_model", "base_year"}
+        required = {"model", "forecast_base_year"}
         missing = required.difference(bundle)
         if missing:
             raise ValueError(f"В файле модели отсутствуют обязательные поля: {sorted(missing)}")
         self.bundle = bundle
-        self.price_model = bundle["price_model"]
-        self.trend_model = bundle["trend_model"]
-        self.selected_model = bundle.get("selected_model", "CatBoost")
+        self.model = bundle["model"]
+        self.selected_model = bundle.get("model_type", "HistGradientBoostingRegressor")
         self.model_df = model_df
         self.annual_market = annual_market
-        self.base_year = int(bundle["base_year"])
+        self.base_year = int(bundle["forecast_base_year"])
         self.region_price_coef = region_price_coef_from(model_df)
         self.avg_inflation_level = float(
             annual_market.attrs.get("avg_inflation_level", MIN_INFLATION_PCT)
@@ -593,34 +590,25 @@ class PrognosisModel:
 
     def forecast(self, apartment: dict, n_years: int) -> dict:
         years = list(range(self.base_year, self.base_year + int(n_years) + 1))
-        model_prices = [
-            float(self.trend_model.predict(self._apartment_row(apartment, year))[0])
-            for year in years[:2]
-        ]
-        if not np.isfinite(model_prices).all() or any(price <= 0 for price in model_prices):
-            raise ValueError("Модель вернула некорректную последовательность цен.")
-        prices = [model_prices[0], model_prices[1]]
-        first_growth = (model_prices[1] / model_prices[0] - 1) * 100
-        annual_growth = [0.0, first_growth]
+        base_price = float(self.model.predict(self._apartment_row(apartment, self.base_year))[0])
+        if not np.isfinite(base_price) or base_price <= 0:
+            raise ValueError("Модель вернула некорректную базовую цену квартиры.")
 
-        # Preserve the apartment-specific first-year growth, then converge future
-        # yearly rates toward the observed market inflation level.
-        target_growth = float(
-            np.clip(self.avg_inflation_level, MIN_INFLATION_PCT, MAX_INFLATION_PCT)
-        )
-        current_growth = first_growth
-        for _year in years[2:]:
-            difference = current_growth - target_growth
-            if abs(difference) <= 1e-12:
-                current_growth = target_growth
-            else:
-                step = min(
-                    max(abs(difference) * INFLATION_CONVERGENCE, MIN_INFLATION_STEP_PP),
-                    abs(difference),
-                )
-                current_growth -= np.copysign(step, difference)
-            annual_growth.append(float(current_growth))
-            prices.append(prices[-1] * (1 + current_growth / 100.0))
+        # HistGradientBoosting does not extrapolate calendar years past its training
+        # range. Use the observed annual inflation trend for each forecast year.
+        trend_slope = float(self.annual_market.attrs["inflation_trend_pct_per_year"])
+        trend_center_year = float(self.annual_market.attrs["inflation_trend_center_year"])
+        trend_center_pct = float(self.annual_market.attrs["inflation_trend_center_pct"])
+        prices = [base_price]
+        annual_growth = [0.0]
+        for year in years[1:]:
+            growth = float(np.clip(
+                trend_center_pct + trend_slope * (year - trend_center_year),
+                MIN_INFLATION_PCT,
+                MAX_INFLATION_PCT,
+            ))
+            annual_growth.append(growth)
+            prices.append(prices[-1] * (1 + growth / 100.0))
         forecast_df = pd.DataFrame({
             "Год": years,
             "Прогноз цены, млн руб.": [round(price / 1_000_000, 2) for price in prices],
@@ -634,7 +622,7 @@ class PrognosisModel:
             ],
             "base_price": prices[0],
             "coef_region": float(self.region_price_coef.get(normalize_text(apartment["region"]), 1.0)),
-            "growth_source": "динамическая Ridge-модель",
+            "growth_source": "HistGradientBoostingRegressor",
             "base_year": self.base_year,
             "avg_inflation_level": self.avg_inflation_level,
             "infl_first": annual_growth[1] if len(annual_growth) > 1 else None,
@@ -643,7 +631,7 @@ class PrognosisModel:
 
 
 def train_model() -> PrognosisModel:
-    """Load the trained CatBoost and dynamic Ridge models from the saved bundle."""
+    """Load the pre-trained HistGradientBoosting model and market inflation data."""
     if not MODEL_BUNDLE_PATH.exists():
         raise FileNotFoundError(f"Файл обученной модели не найден: {MODEL_BUNDLE_PATH}")
     df_raw = read_csv_robust(DATA_PATH)
