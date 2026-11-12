@@ -10,7 +10,6 @@ import sys
 import joblib
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.feature_extraction import DictVectorizer
-from sklearn.linear_model import Ridge
 from sklearn.utils.validation import check_is_fitted
 
 
@@ -488,7 +487,7 @@ def record_features(row, support, with_time: bool = True, trend_scale: float = 1
 class ApartmentEstimator(RegressorMixin, BaseEstimator):
     """Sklearn estimator interface for the persisted price models."""
 
-    def __init__(self, kind="ridge_time", alpha=100.0, trend_scale=1.0,
+    def __init__(self, kind="cat", alpha=100.0, trend_scale=1.0,
                  max_iter=180, max_leaf_nodes=31, min_samples_leaf=40,
                  learning_rate=0.07, l2_regularization=0.0,
                  iterations=240, depth=6, l2_leaf_reg=5.0,
@@ -517,9 +516,15 @@ class ApartmentEstimator(RegressorMixin, BaseEstimator):
     def predict(self, X):
         check_is_fitted(self, "is_fitted_")
         X = X.copy().reset_index(drop=True)
-        records = [record_features(row, self.support_, self.with_time_, self.trend_scale)
-                   for row in X[FEATURE_COLS].to_dict("records")]
-        log_price_per_sqm = self.model_.predict(self.vectorizer_.transform(records))
+        if self.kind == "cat":
+            frame = X[FEATURE_COLS].copy()
+            for col in CATEGORICAL_COLS:
+                frame[col] = frame[col].astype(str)
+            log_price_per_sqm = self.model_.predict(frame)
+        else:
+            records = [record_features(row, self.support_, self.with_time_, self.trend_scale)
+                       for row in X[FEATURE_COLS].to_dict("records")]
+            log_price_per_sqm = self.model_.predict(self.vectorizer_.transform(records))
         prices = np.exp(log_price_per_sqm) * X["area"].to_numpy(dtype=float)
         if not np.isfinite(prices).all():
             raise ValueError("Модель вернула некорректную цену квартиры.")
@@ -634,7 +639,7 @@ class PrognosisModel:
             ],
             "base_price": prices[0],
             "coef_region": float(self.region_price_coef.get(normalize_text(apartment["region"]), 1.0)),
-            "growth_source": "динамическая Ridge-модель",
+            "growth_source": "dynamic_forecast",
             "base_year": self.base_year,
             "avg_inflation_level": self.avg_inflation_level,
             "infl_first": annual_growth[1] if len(annual_growth) > 1 else None,
@@ -643,7 +648,7 @@ class PrognosisModel:
 
 
 def train_model() -> PrognosisModel:
-    """Load the trained CatBoost and dynamic Ridge models from the saved bundle."""
+    """Load the saved apartment forecasting models."""
     if not MODEL_BUNDLE_PATH.exists():
         raise FileNotFoundError(f"Файл обученной модели не найден: {MODEL_BUNDLE_PATH}")
     df_raw = read_csv_robust(DATA_PATH)

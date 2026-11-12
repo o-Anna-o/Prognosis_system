@@ -57,7 +57,7 @@ function startStatusPolling(): () => void {
       if (stopped) return;
       if (response.ok && status.ready) {
         dot.classList.add("hidden");
-        text.textContent = "Модель CatBoost + Ridge";
+        text.textContent = "Модель загружена";
       } else if (status.error) {
         dot.className = "status-dot error";
         text.textContent = "Ошибка обучения модели";
