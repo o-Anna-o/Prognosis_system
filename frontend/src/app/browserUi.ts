@@ -46,7 +46,8 @@ function loadChartLibraries(): Promise<void> {
 function startStatusPolling(): () => void {
   const dot = document.querySelector<HTMLElement>(".status-dot");
   const text = document.getElementById("status-text");
-  if (!dot || !text) return () => undefined;
+  const statusContainer = document.getElementById("model-status");
+  if (!dot || !text || !statusContainer) return () => undefined;
 
   let stopped = false;
   let timer = 0;
@@ -56,7 +57,7 @@ function startStatusPolling(): () => void {
       const status: { ready?: boolean; error?: string | null } = await response.json();
       if (stopped) return;
       if (response.ok && status.ready) {
-        dot.classList.add("hidden");
+        statusContainer.classList.add("hidden");
         text.textContent = "Модель загружена";
       } else if (status.error) {
         dot.className = "status-dot error";
