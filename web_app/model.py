@@ -364,11 +364,14 @@ def region_price_coef_from(data: pd.DataFrame) -> pd.Series:
 # Исторические значения, заданные пользователем. Лог-линейный тренд
 # рассчитывается один раз при загрузке модуля и используется для будущих лет.
 OFFICIAL_INFLATION_RATES = {2022: 11.92, 2023: 7.42, 2024: 9.52, 2025: 5.59}
-MIN_FORECAST_INFLATION_PCT = 4.0
+MIN_FORECAST_INFLATION_PCT = 3.0
 _inflation_years = np.asarray(list(OFFICIAL_INFLATION_RATES), dtype=float)
-_inflation_log_rates = np.log(np.asarray(list(OFFICIAL_INFLATION_RATES.values()), dtype=float))
+_inflation_log_excess = np.log(
+    np.asarray(list(OFFICIAL_INFLATION_RATES.values()), dtype=float)
+    - MIN_FORECAST_INFLATION_PCT
+)
 INFLATION_TREND_SLOPE, INFLATION_TREND_INTERCEPT = np.polyfit(
-    _inflation_years, _inflation_log_rates, 1
+    _inflation_years, _inflation_log_excess, 1
 )
 
 
@@ -377,8 +380,8 @@ def forecast_inflation_rate(year: int) -> float:
     year = int(year)
     if year in OFFICIAL_INFLATION_RATES:
         return float(OFFICIAL_INFLATION_RATES[year])
-    rate = float(np.exp(INFLATION_TREND_INTERCEPT + INFLATION_TREND_SLOPE * year))
-    return max(MIN_FORECAST_INFLATION_PCT, rate)
+    excess_rate = float(np.exp(INFLATION_TREND_INTERCEPT + INFLATION_TREND_SLOPE * year))
+    return MIN_FORECAST_INFLATION_PCT + excess_rate
 
 def compute_annual_market(infl_raw: pd.DataFrame) -> pd.DataFrame:
     """Estimate annual price inflation from robust median price per square metre."""

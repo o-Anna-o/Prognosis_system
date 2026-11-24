@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import Chart from "chart.js/auto";
+import ChartDataLabels from "chartjs-plugin-datalabels";
 import { getReference, predictApartment, predictApartments } from "../../shared/api/forecasting";
 import { useApartmentsActions, useApartmentsState } from "../../contexts/ApartmentsContext";
 import { ApartmentCard } from "./ApartmentCard";
 import { validateApartment } from "./validation";
 import { apartmentVisual, compareApartments } from "./comparison";
 import type { ApartmentInput, PredictionResult } from "../../shared/api/types";
+import type { ChartOptions } from "chart.js";
+
+Chart.register(ChartDataLabels);
 
 const money = (rubles: number) => `${Math.round(rubles).toLocaleString("ru-RU")} ₽`;
 const moneyMln = (millions: number) => money(millions * 1_000_000);
@@ -48,110 +53,47 @@ function parameterSignature(apartments: { id: string; parameters: object }[]) {
   return JSON.stringify(apartments.map(({ id, parameters }) => [id, parameters]));
 }
 
-interface ForecastLine {
-  label: string;
-  data: (number | null)[];
-  color: string;
-  dash?: number[];
-}
-
-function ForecastChart({ years, lines, showPointLabels = true, fill = false }: { years: number[]; lines: ForecastLine[]; showPointLabels?: boolean; fill?: boolean }) {
-  if (!years.length || !lines.length) return null;
-  const width = 960;
-  const height = 360;
-  const left = 82;
-  const right = 24;
-  const top = 34;
-  const bottom = 62;
-  const values = lines.flatMap((line) => line.data.filter((value): value is number => value !== null && Number.isFinite(value)));
-  if (!values.length) return null;
-  const dataMin = Math.min(...values);
-  const dataMax = Math.max(...values);
-  const padding = Math.max((dataMax - dataMin) * 0.12, Math.abs(dataMax) * 0.025, 0.1);
-  const min = Math.max(0, dataMin - padding);
-  const max = dataMax + padding || 1;
-  const plotHeight = height - top - bottom;
-  const plotWidth = width - left - right;
-  const xAt = (index: number) => left + (years.length < 2 ? plotWidth / 2 : index * plotWidth / (years.length - 1));
-  const yAt = (value: number) => top + (max - value) * plotHeight / (max - min || 1);
-  const ticks = Array.from({ length: 5 }, (_, index) => max - index * (max - min) / 4);
-  const format = (value: number) => value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  return <svg className="forecast-chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="График прогноза цены квартир по годам">
-    {ticks.map((value, index) => <g key={`tick-${index}`}>
-      <line x1={left} x2={width - right} y1={yAt(value)} y2={yAt(value)} stroke="#cbd5e1" strokeDasharray="4 5" />
-      <text x={left - 10} y={yAt(value) + 4} textAnchor="end" fill="#334155" fontSize="12">{format(value)}</text>
-    </g>)}
-    <text x={18} y={height / 2} textAnchor="middle" fill="#334155" fontSize="12" transform={`rotate(-90 18 ${height / 2})`}>млн руб.</text>
-    {years.map((year, index) => <g key={`year-${year}`}>
-      <line x1={xAt(index)} x2={xAt(index)} y1={top} y2={height - bottom} stroke="#e2e8f0" strokeDasharray="2 6" />
-      <text x={xAt(index)} y={height - bottom + 22} textAnchor="middle" fill="#334155" fontSize="12">{year}</text>
-    </g>)}
-    {lines.map((line) => {
-      const points = line.data.map((value, index) => value === null || !Number.isFinite(value)
-        ? null
-        : { x: xAt(index), y: yAt(value), value, year: years[index]! });
-      const segments: { path: string; fillPath?: string }[] = [];
-      let segment: { x: number; y: number }[] = [];
-      const saveSegment = () => {
-        if (!segment.length) return;
-        let path = `M${segment[0]!.x},${segment[0]!.y}`;
-        for (let index = 1; index < segment.length; index += 1) {
-          const previous = segment[index - 1]!;
-          const current = segment[index]!;
-          const midpoint = (previous.x + current.x) / 2;
-          path += ` Q${previous.x},${previous.y} ${midpoint},${(previous.y + current.y) / 2}`;
-          if (index === segment.length - 1) path += ` T${current.x},${current.y}`;
-        }
-        const fillPath = fill && segment.length > 1
-          ? `${path} L${segment.at(-1)!.x},${height - bottom} L${segment[0]!.x},${height - bottom} Z`
-          : undefined;
-        segments.push({ path, fillPath });
-        segment = [];
-      };
-      points.forEach((point) => {
-        if (!point) {
-          saveSegment();
-        } else {
-          segment.push(point);
-        }
-      });
-      saveSegment();
-      return <g key={line.label}>
-        {segments.map((segment, index) => <g key={`${line.label}-segment-${index}`}>
-          {segment.fillPath && <path d={segment.fillPath} fill="rgba(37, 99, 235, 0.12)" stroke="none" />}
-          <path d={segment.path} fill="none" stroke={line.color} strokeWidth="2.5" strokeDasharray={line.dash?.join(" ")} strokeLinecap="round" strokeLinejoin="round" />
-        </g>)}
-        {points.map((point) => point && <g key={`${line.label}-${point.year}`}>
-          <circle cx={point.x} cy={point.y} r="5" fill={line.color} stroke="white" strokeWidth="2"><title>{`${line.label}: ${format(point.value)} млн руб. (${point.year} г.)`}</title></circle>
-          {showPointLabels && <text x={point.x} y={point.y - 12} textAnchor="middle" fill={line.color} fontSize="11" fontWeight="600">{format(point.value)}</text>}
-        </g>)}
-      </g>;
-    })}
-    <g transform={`translate(${left}, ${height - 15})`}>
-      {lines.map((line, index) => {
-        const columnWidth = Math.max(150, (plotWidth - 12) / lines.length);
-        const x = index * columnWidth;
-        return <g key={`legend-${line.label}`} transform={`translate(${x}, 0)`}>
-          <line x1="0" x2="22" y1="0" y2="0" stroke={line.color} strokeWidth="3" strokeDasharray={line.dash?.join(" ")} />
-          <text x="29" y="4" fill="#0f172a" fontSize="12">{line.label}</text>
-        </g>;
-      })}
-    </g>
-  </svg>;
-}
+const chartOptions = (label: string, years: number[], showDataLabels = true): ChartOptions<"line"> => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  layout: { padding: { top: 30 } },
+  interaction: { mode: "nearest", intersect: false },
+  plugins: {
+    legend: { position: "bottom", labels: { color: "#0f172a", usePointStyle: true, font: { size: 13 } } },
+    tooltip: { callbacks: { label: (item) => ` ${item.dataset.label}: ${item.parsed.y.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} млн руб. (${years[item.dataIndex]} г.)` } },
+    datalabels: showDataLabels
+      ? { color: label, anchor: "end", align: "top", offset: 6, font: { size: 12, weight: "bold" }, formatter: (value) => Number(value).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
+      : { display: false },
+  },
+  scales: {
+    x: { title: { display: true, text: "Год" }, ticks: { color: "#334155" }, grid: { color: "rgba(203, 213, 225, 0.4)" } },
+    y: { title: { display: true, text: "млн руб.", color: "#334155" }, ticks: { color: "#334155" }, grid: { color: "rgba(203, 213, 225, 0.4)" } },
+  },
+});
 
 function ApartmentComparison({ results }: { results: { id: string; order: number; title: string; result: PredictionResult }[] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const comparison = useMemo(() => compareApartments(results), [results]);
-  const lines = useMemo(() => results.map((item): ForecastLine => {
-    const visual = apartmentVisual(item.order);
-    const points = new Map(item.result.forecast_exact?.map((point) => [point.year, point.price_mln] as [number, number])
-      ?? item.result.forecast.map((point) => [point.Год, point["Прогноз цены, млн руб."]] as [number, number]));
-    if (comparison.years.length && item.result.base_year <= comparison.years[0]!) {
-      points.set(item.result.base_year, (item.result.base_price_exact ?? item.result.base_price) / 1_000_000);
-    }
-    return { label: item.title, data: comparison.years.map((year) => points.get(year) ?? null), color: visual.color, dash: visual.lineDash };
-  }), [comparison.years, results]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || comparison.years.length === 0) return;
+    const chart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: comparison.years,
+        datasets: results.map((item) => {
+          const visual = apartmentVisual(item.order);
+          const points = new Map(item.result.forecast_exact?.map((point) => [point.year, point.price_mln] as [number, number])
+            ?? item.result.forecast.map((point) => [point.Год, point["Прогноз цены, млн руб."]] as [number, number]));
+          if (item.result.base_year <= comparison.years[0]!) points.set(item.result.base_year, (item.result.base_price_exact ?? item.result.base_price) / 1_000_000);
+          return { label: item.title, data: comparison.years.map((year) => points.get(year) ?? null), borderColor: visual.color, backgroundColor: visual.color, pointBackgroundColor: visual.color, pointStyle: visual.marker, borderDash: visual.lineDash, tension: 0.25, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5, fill: false };
+        }),
+      },
+      options: chartOptions("#1a4fa0", comparison.years, false),
+    });
+    return () => chart.destroy();
+  }, [comparison.years, results]);
 
   if (comparison.rows.length < 2) return <p>Для сравнения недостаточно полных прогнозов.</p>;
   const ranked = [...comparison.rows].sort((a, b) => a.place - b.place || a.order - b.order);
@@ -171,7 +113,7 @@ function ApartmentComparison({ results }: { results: { id: string; order: number
         <td>{results[0]?.result.forecast.find((forecast) => forecast.Год === year)?.["Инфляция, %"].toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) ?? "—"}</td>
       </tr>)}</tbody>
     </table></div>
-    <h3>Общий прогноз</h3><div className="chart-wrap comparison-chart"><ForecastChart years={comparison.years} lines={lines} showPointLabels={false} /></div>
+    <h3>Общий прогноз</h3><div className="chart-wrap comparison-chart"><canvas ref={canvasRef} aria-label="Сравнительный прогноз цен по годам" /></div>
     <h3>Сравнение потенциала роста квартир</h3>
     <div className="table-wrap"><table className="forecast-table" style={{ textAlign: "center" }}><thead><tr><th style={{ textAlign: "left" }}>Рейтинг</th><th style={{ textAlign: "left" }}>Улица</th><th>Начальная стоимость</th><th>Конечная стоимость</th><th>Прирост</th><th>Средний % роста в год</th><th>Суммарный прирост, %</th></tr></thead><tbody>
       {ranked.map((row) => {
@@ -185,16 +127,23 @@ function ApartmentComparison({ results }: { results: { id: string; order: number
 }
 
 function IndividualChart({ result, title, order }: { result: PredictionResult; title: string; order: number }) {
-  const visual = apartmentVisual(order);
-  const exactForecast = result.forecast_exact?.map((point) => ({ year: point.year, price: point.price_mln }))
-    ?? result.forecast.map((point) => ({ year: point.Год, price: point["Прогноз цены, млн руб."] }));
-  const years = exactForecast.map((point) => point.year);
-  return <div className="chart-wrap"><ForecastChart years={years} lines={[{
-    label: title,
-    data: exactForecast.map((point) => point.price),
-    color: visual.color,
-    dash: visual.lineDash,
-  }]} fill /></div>;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const visual = apartmentVisual(order);
+    const years = result.forecast.map((point) => point.Год);
+    const chart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: years,
+        datasets: [{ label: title, data: result.forecast.map((point) => point["Прогноз цены, млн руб."]), borderColor: visual.color, backgroundColor: "rgba(37, 99, 235, 0.12)", pointBackgroundColor: visual.color, pointStyle: visual.marker, borderDash: visual.lineDash, tension: 0.25, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5, fill: true }],
+      },
+      options: chartOptions(visual.color, years),
+    });
+    return () => chart.destroy();
+  }, [order, result, title]);
+  return <div className="chart-wrap"><canvas ref={canvasRef} aria-label={`Прогноз цены: ${title}`} /></div>;
 }
 
 export function ApartmentWorkspace() {
