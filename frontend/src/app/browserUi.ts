@@ -16,33 +16,6 @@ interface EdaCharts {
   floor?: string;
 }
 
-let chartLibrariesPromise: Promise<void> | null = null;
-
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = src;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`Не удалось загрузить ${src}`));
-    document.body.appendChild(script);
-  });
-}
-
-function loadChartLibraries(): Promise<void> {
-  chartLibrariesPromise ??= (async () => {
-    try {
-      await loadScript("https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js");
-      await loadScript("https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js");
-      const chart = (window as Window & { Chart?: { register: (plugin: unknown) => void }; ChartDataLabels?: unknown }).Chart;
-      const plugin = (window as Window & { ChartDataLabels?: unknown }).ChartDataLabels;
-      if (chart && plugin) chart.register(plugin);
-    } catch (error) {
-      console.error("Не удалось загрузить библиотеки графиков:", error);
-    }
-  })();
-  return chartLibrariesPromise;
-}
-
 function startStatusPolling(): () => void {
   const dot = document.querySelector<HTMLElement>(".status-dot");
   const text = document.getElementById("status-text");
@@ -310,7 +283,6 @@ function initializeAssistant(): () => void {
 }
 
 export function initializeBrowserUi(): () => void {
-  void loadChartLibraries();
   const cleanups = [startStatusPolling(), initializeSectionTabs(), initializeAssistant()];
   return () => cleanups.forEach((cleanup) => cleanup());
 }

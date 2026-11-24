@@ -8,10 +8,10 @@ import pandas as pd
 import re
 import sys
 import joblib
+from catboost import dev_utils
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.utils.validation import check_is_fitted
-
 
 # Параметры проекта
 
@@ -361,6 +361,25 @@ def region_price_coef_from(data: pd.DataFrame) -> pd.Series:
 
 # Инфляция
 
+# Исторические значения, заданные пользователем. Лог-линейный тренд
+# рассчитывается один раз при загрузке модуля и используется для будущих лет.
+OFFICIAL_INFLATION_RATES = {2022: 11.92, 2023: 7.42, 2024: 9.52, 2025: 5.59}
+MIN_FORECAST_INFLATION_PCT = 4.0
+_inflation_years = np.asarray(list(OFFICIAL_INFLATION_RATES), dtype=float)
+_inflation_log_rates = np.log(np.asarray(list(OFFICIAL_INFLATION_RATES.values()), dtype=float))
+INFLATION_TREND_SLOPE, INFLATION_TREND_INTERCEPT = np.polyfit(
+    _inflation_years, _inflation_log_rates, 1
+)
+
+
+def forecast_inflation_rate(year: int) -> float:
+    """Project the annual inflation rate with the fitted 2022–2025 trend."""
+    year = int(year)
+    if year in OFFICIAL_INFLATION_RATES:
+        return float(OFFICIAL_INFLATION_RATES[year])
+    rate = float(np.exp(INFLATION_TREND_INTERCEPT + INFLATION_TREND_SLOPE * year))
+    return max(MIN_FORECAST_INFLATION_PCT, rate)
+
 def compute_annual_market(infl_raw: pd.DataFrame) -> pd.DataFrame:
     """Estimate annual price inflation from robust median price per square metre."""
     data = infl_raw.copy()
@@ -598,53 +617,47 @@ class PrognosisModel:
 
     def forecast(self, apartment: dict, n_years: int) -> dict:
         years = list(range(self.base_year, self.base_year + int(n_years) + 1))
-        model_prices = [
-            float(self.trend_model.predict(self._apartment_row(apartment, year))[0])
-            for year in years[:2]
-        ]
-        if not np.isfinite(model_prices).all() or any(price <= 0 for price in model_prices):
-            raise ValueError("Модель вернула некорректную последовательность цен.")
-        prices = [model_prices[0], model_prices[1]]
-        first_growth = (model_prices[1] / model_prices[0] - 1) * 100
-        annual_growth = [0.0, first_growth]
-
-        # Preserve the apartment-specific first-year growth, then converge future
-        # yearly rates toward the observed market inflation level.
-        target_growth = float(
-            np.clip(self.avg_inflation_level, MIN_INFLATION_PCT, MAX_INFLATION_PCT)
+        # CatBoost fixes the starting price; dynamic Ridge supplies only annual
+        # growth rates over the requested horizon.
+        base_price = float(
+            self.price_model.predict(self._apartment_row(apartment, self.base_year))[0]
         )
-        current_growth = first_growth
-        for _year in years[2:]:
-            difference = current_growth - target_growth
-            if abs(difference) <= 1e-12:
-                current_growth = target_growth
-            else:
-                step = min(
-                    max(abs(difference) * INFLATION_CONVERGENCE, MIN_INFLATION_STEP_PP),
-                    abs(difference),
-                )
-                current_growth -= np.copysign(step, difference)
-            annual_growth.append(float(current_growth))
-            prices.append(prices[-1] * (1 + current_growth / 100.0))
+        ridge_prices = [
+            float(self.trend_model.predict(self._apartment_row(apartment, year))[0])
+            for year in years
+        ]
+        if (not np.isfinite(base_price) or base_price <= 0
+                or not np.isfinite(ridge_prices).all()
+                or any(price <= 0 for price in ridge_prices)):
+            raise ValueError("?????? ??????? ???????????? ?????????????????? ???.")
+
+        prices = [base_price]
+        annual_growth = [0.0]
+        for previous, current in zip(ridge_prices, ridge_prices[1:]):
+            ratio = current / previous
+            annual_growth.append(float((ratio - 1.0) * 100.0))
+            prices.append(prices[-1] * ratio)
+
         forecast_df = pd.DataFrame({
-            "Год": years,
-            "Прогноз цены, млн руб.": [round(price / 1_000_000, 2) for price in prices],
-            "Инфляция, %": [round(value, 1) for value in annual_growth],
+            "\u0413\u043e\u0434": years,
+            "\u041f\u0440\u043e\u0433\u043d\u043e\u0437 \u0446\u0435\u043d\u044b, \u043c\u043b\u043d \u0440\u0443\u0431.": [round(price / 1_000_000, 2) for price in prices],
+            "\u0418\u043d\u0444\u043b\u044f\u0446\u0438\u044f, %": [round(forecast_inflation_rate(year), 2) for year in years],
         })
         return {
             "forecast": forecast_df,
             "forecast_exact": [
-                {"year": year, "price_mln": price / 1_000_000, "inflation_pct": growth}
-                for year, price, growth in zip(years, prices, annual_growth)
+                {"year": year, "price_mln": price / 1_000_000, "inflation_pct": forecast_inflation_rate(year)}
+                for year, price in zip(years, prices)
             ],
-            "base_price": prices[0],
+            "base_price": base_price,
             "coef_region": float(self.region_price_coef.get(normalize_text(apartment["region"]), 1.0)),
             "growth_source": "dynamic_forecast",
             "base_year": self.base_year,
             "avg_inflation_level": self.avg_inflation_level,
-            "infl_first": annual_growth[1] if len(annual_growth) > 1 else None,
-            "infl_last": annual_growth[-1] if len(annual_growth) > 1 else None,
+            "infl_first": forecast_inflation_rate(years[0]) if years else None,
+            "infl_last": forecast_inflation_rate(years[-1]) if years else None,
         }
+
 
 
 def train_model() -> PrognosisModel:
