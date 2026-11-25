@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AirCodeReview">{
+  &quot;review&quot;: {
+    &quot;session&quot;: {
+      &quot;workspaceId&quot;: {
+        &quot;value&quot;: &quot;C:/Users/AnnaA/Desktop/Prognosis_system&quot;
+      },
+      &quot;localSessionIdentity&quot;: {
+        &quot;projectDirectory&quot;: &quot;C:/Users/AnnaA/Desktop/Prognosis_system&quot;,
+        &quot;localSessionId&quot;: &quot;local:57b299e3-3abc-4815-81bf-2c491e308a90&quot;
+      }
+    },
+    &quot;sinceCommit&quot;: &quot;32a33127bfe7624ddb1b9f5b773536fb864f60d1&quot;,
+    &quot;viewedFilePaths&quot;: [
+      &quot;C:/Users/AnnaA/Desktop/Prognosis_system/.idea/.gitignore&quot;
+    ]
+  }
+}</component>
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="9a96e0c8-0e9b-4d50-98bb-5ba4d566b103" name="Changes" comment="заново проведено сравнение моделей">
+      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.ipynb_checkpoints/Comparison_base_model-checkpoint.ipynb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.ipynb_checkpoints/Comparison_prognosis_model-checkpoint.ipynb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.ipynb_checkpoints/Dynamic_Ridge_prognosis_model-checkpoint.ipynb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Comparison_base_model.ipynb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Comparison_prognosis_model.ipynb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Dynamic_Ridge_prognosis_model.ipynb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Сравнение базовых моделей.xlsx" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/выбор модели для базовой оценки/Prognosis_model.ipynb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/выбор модели для базовой оценки/Prognosis_model.joblib" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/сравнение прогнозной модели.xlsx" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="5-catboost-model" />
+      </map>
+    </option>
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;o-Anna-o&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/o-Anna-o/Prognosis_system.git&quot;,
+    &quot;accountId&quot;: &quot;fbe490c2-4400-4563-9fe8-d4c3c6586f88&quot;
+  }
+}</component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
+  </component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.0" />
+      <entry key="MS500" value="1.0" />
+      <entry key="S2" value="1.0" />
+      <entry key="S5" value="1.0" />
+      <entry key="S10" value="1.0" />
+      <entry key="S30" value="1.0000017044622735" />
+      <entry key="S60" value="1.0041246607870804" />
+      <entry key="M2" value="1.2030452176771615" />
+      <entry key="M5" value="3.1038403962176715" />
+      <entry key="M10" value="5.586721205715261" />
+      <entry key="M15" value="6.947493762227217" />
+      <entry key="M30" value="8.711991791563742" />
+      <entry key="H1" value="9.789608724443044" />
+      <entry key="H2" value="12.44304546149537" />
+      <entry key="H4" value="47.65997443871733" />
+      <entry key="D1" value="437.64749329245126" />
+      <entry key="W1" value="662.3478758606269" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="0.0" />
+      <entry key="S5" value="0.0" />
+      <entry key="S10" value="0.0" />
+      <entry key="S30" value="0.0" />
+      <entry key="S60" value="0.0" />
+      <entry key="M2" value="7.379845495105393E-169" />
+      <entry key="M5" value="6.7691369304763E-68" />
+      <entry key="M10" value="3.4633316359964773E-34" />
+      <entry key="M15" value="6.121532847529876E-23" />
+      <entry key="M30" value="1.0980075269325103E-11" />
+      <entry key="H1" value="4.677042610056296E-6" />
+      <entry key="H2" value="0.0030569501355929857" />
+      <entry key="H4" value="0.07818186985016476" />
+      <entry key="D1" value="1.1651145490493169" />
+      <entry key="W1" value="1.851427721005198" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="9.511286372808835E-5" />
+      <entry key="MS500" value="0.1569089989103304" />
+      <entry key="S2" value="0.6293785867524289" />
+      <entry key="S5" value="0.8309306621596727" />
+      <entry key="S10" value="0.9115539820327003" />
+      <entry key="S30" value="0.9696051040881839" />
+      <entry key="S60" value="0.988805644961019" />
+      <entry key="M2" value="1.1952746879429443" />
+      <entry key="M5" value="3.1004168464265045" />
+      <entry key="M10" value="5.5848079321023185" />
+      <entry key="M15" value="6.94614493886439" />
+      <entry key="M30" value="8.711269941878424" />
+      <entry key="H1" value="9.789238072989455" />
+      <entry key="H2" value="12.445904835137481" />
+      <entry key="H4" value="47.73800038185393" />
+      <entry key="D1" value="438.81246547451923" />
+      <entry key="W1" value="664.1992732360496" />
+    </decayedShown>
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 5
+}</component>
+  <component name="ProjectId" id="3M9H6edQBQZH0aJlCe8CjwuerE4" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "git-widget-placeholder": "6-select-model",
+    "ignore.virus.scanning.warn.message": "true",
+    "last_opened_file_path": "C:/Users/AnnaA/Desktop/Prognosis_system",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.jshint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.jshint": "",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "python.packages.toolwindow.project.migrated.to.right.top.v2": "true",
+    "settings.editor.selected.configurable": "com.intellij.air.settings.ai.providers"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-34611be1ca5a-e0583fc556d1-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-263.7307.206" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="9a96e0c8-0e9b-4d50-98bb-5ba4d566b103" name="Changes" comment="" />
+      <created>1794755688359</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1794755688359</updated>
+    </task>
+    <task id="LOCAL-00001" summary="для базовой оценки catboost, для прогноза ridge">
+      <option name="closed" value="true" />
+      <created>1795531471159</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1795531471159</updated>
+    </task>
+    <task id="LOCAL-00002" summary="для базовой оценки catboost, для прогноза ridge">
+      <option name="closed" value="true" />
+      <created>1795531768878</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1795531768878</updated>
+    </task>
+    <task id="LOCAL-00003" summary="исправлены стили графиков, добавлена таблица инфляции">
+      <option name="closed" value="true" />
+      <created>1795534893594</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1795534893594</updated>
+    </task>
+    <task id="LOCAL-00004" summary="исправлены стили графиков, добавлена таблица инфляции">
+      <option name="closed" value="true" />
+      <created>1795534909194</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1795534909194</updated>
+    </task>
+    <task id="LOCAL-00005" summary=".">
+      <option name="closed" value="true" />
+      <created>1795554942086</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1795554942086</updated>
+    </task>
+    <task id="LOCAL-00006" summary="заново проведено сравнение моделей">
+      <option name="closed" value="true" />
+      <created>1795608485459</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1795608485459</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="origin/5-catboost-model" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="для базовой оценки catboost, для прогноза ridge" />
+    <MESSAGE value="исправлены стили графиков, добавлена таблица инфляции" />
+    <MESSAGE value="." />
+    <MESSAGE value="заново проведено сравнение моделей" />
+    <option name="LAST_COMMIT_MESSAGE" value="заново проведено сравнение моделей" />
+  </component>
+</project>
