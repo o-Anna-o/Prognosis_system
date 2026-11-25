@@ -63,8 +63,8 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 Создайте `.env` в корне проекта. Замените имя пользователя, пароль и базу на свои данные:
 
 ```dotenv
-DATABASE_URL=postgresql://prognosis_user:your_password@127.0.0.1:5432/prognosis_db
-DJANGO_SECRET_KEY=replace-this-with-a-long-random-secret
+DATABASE_URL=postgresql://prognosis_user:password@127.0.0.1:5432/prognosis_db
+DJANGO_SECRET_KEY=secret
 DJANGO_DEBUG=true
 DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
 ```

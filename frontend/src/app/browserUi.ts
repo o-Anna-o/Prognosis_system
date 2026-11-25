@@ -46,6 +46,7 @@ function loadChartLibraries(): Promise<void> {
 function startStatusPolling(): () => void {
   const dot = document.querySelector<HTMLElement>(".status-dot");
   const text = document.getElementById("status-text");
+  const statusElement = document.getElementById("model-status");
   if (!dot || !text) return () => undefined;
 
   let stopped = false;
@@ -56,9 +57,9 @@ function startStatusPolling(): () => void {
       const status: { ready?: boolean; error?: string | null } = await response.json();
       if (stopped) return;
       if (response.ok && status.ready) {
-        dot.classList.add("hidden");
-        text.textContent = "Модель CatBoost + Ridge";
+        statusElement?.classList.add("hidden");
       } else if (status.error) {
+        statusElement?.classList.remove("hidden");
         dot.className = "status-dot error";
         text.textContent = "Ошибка обучения модели";
         console.error(status.error);

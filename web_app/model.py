@@ -10,7 +10,8 @@ import sys
 import joblib
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.feature_extraction import DictVectorizer
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import ElasticNet, Ridge
+from sklearn.preprocessing import StandardScaler
 from sklearn.utils.validation import check_is_fitted
 
 
@@ -271,11 +272,80 @@ CATEGORICAL_COLS = ["region", "district", "street", "wall_material_code"]
 NUMERIC_COLS = ["year_build", "floor", "area"]
 FEATURE_COLS = CATEGORICAL_COLS + NUMERIC_COLS + ["period_year"]
 MIN_DEALS_FOR_INFLATION = 30
-MIN_INFLATION_PCT = 7.0
+OFFICIAL_INFLATION_RATES = {
+    2022: 11.92,
+    2023: 7.42,
+    2024: 9.52,
+    2025: 5.59,
+}
+OFFICIAL_INFLATION_WEIGHTS = {2022: 1.0, 2023: 2.0, 2024: 3.0, 2025: 4.0}
+MIN_INFLATION_PCT = float(np.average(
+    list(OFFICIAL_INFLATION_RATES.values()),
+    weights=[OFFICIAL_INFLATION_WEIGHTS[year] for year in OFFICIAL_INFLATION_RATES],
+))
 MAX_INFLATION_PCT = 15.0
+INFLATION_FORECAST_FLOOR_PCT = 3.0
 INFLATION_CONVERGENCE = 0.15
 MIN_INFLATION_STEP_PP = 0.2
 
+# Линейный тренд оценивается по официальным ставкам с повышенным весом последних лет.
+_inflation_years = np.asarray(list(OFFICIAL_INFLATION_RATES), dtype=float)
+_inflation_values = np.asarray(list(OFFICIAL_INFLATION_RATES.values()), dtype=float)
+_inflation_weights = np.asarray(
+    [OFFICIAL_INFLATION_WEIGHTS[year] for year in OFFICIAL_INFLATION_RATES],
+    dtype=float,
+)
+_inflation_year_center = float(np.average(_inflation_years, weights=_inflation_weights))
+_inflation_rate_center = float(np.average(_inflation_values, weights=_inflation_weights))
+INFLATION_TREND_PCT_PER_YEAR = float(
+    np.average(
+        (_inflation_years - _inflation_year_center)
+        * (_inflation_values - _inflation_rate_center),
+        weights=_inflation_weights,
+    )
+    / np.average((_inflation_years - _inflation_year_center) ** 2, weights=_inflation_weights)
+)
+
+
+def forecast_inflation_pct(
+    annual_market: pd.DataFrame,
+    n_years: int,
+    floor_pct: float = INFLATION_FORECAST_FLOOR_PCT,
+    cap_pct: float = MAX_INFLATION_PCT,
+    convergence: float = INFLATION_CONVERGENCE,
+    min_step_pp: float = MIN_INFLATION_STEP_PP,
+) -> tuple[list[int], list[float]]:
+    """Плавно снижает прогноз к целевому уровню с учётом тренда официальных ставок."""
+    if n_years <= 0 or annual_market.empty:
+        return [], []
+
+    hist = annual_market.dropna(subset=["period_year", "inflation_pct"]).copy()
+    hist = hist.sort_values("period_year")
+    if "deals" in hist.columns:
+        reliable_mask = hist["deals"].ge(MIN_DEALS_FOR_INFLATION)
+        reliable_mask &= hist["deals"].shift(1).ge(MIN_DEALS_FOR_INFLATION)
+        reliable_hist = hist.loc[reliable_mask]
+        if not reliable_hist.empty:
+            hist = reliable_hist
+    if hist.empty:
+        return [], []
+
+    last_year = int(hist["period_year"].iloc[-1])
+    current = float(hist["inflation_pct"].iloc[-1])
+    target_base = float(hist["inflation_pct"].tail(3).median())
+    years = list(range(last_year + 1, last_year + int(n_years) + 1))
+    inflations: list[float] = []
+    for year in years:
+        target = float(np.clip(
+            target_base + INFLATION_TREND_PCT_PER_YEAR * (year - last_year),
+            floor_pct,
+            cap_pct,
+        ))
+        difference = current - target
+        step = min(max(abs(difference) * convergence, min_step_pp), abs(difference))
+        current = float(np.clip(current - np.copysign(step, difference), floor_pct, cap_pct))
+        inflations.append(current)
+    return years, inflations
 
 
 # Загрузка и очистка данных
@@ -530,6 +600,81 @@ class ApartmentEstimator(RegressorMixin, BaseEstimator):
 # Register it before loading the model bundle.
 setattr(sys.modules["__main__"], "ApartmentEstimator", ApartmentEstimator)
 
+
+class ApartmentElasticNet(RegressorMixin, BaseEstimator):
+    """ElasticNet price model with apartment-specific linear time interactions."""
+
+    def __init__(self, alpha=0.1, l1_ratio=0.5, max_iter=200_000,
+                 tol=1e-5, random_state=42, trend_scale=1.0):
+        self.alpha = alpha
+        self.l1_ratio = l1_ratio
+        self.max_iter = max_iter
+        self.tol = tol
+        self.random_state = random_state
+        self.trend_scale = trend_scale
+
+    def fit(self, X, y):
+        X = X.copy().reset_index(drop=True)
+        y = np.asarray(y, dtype=float)
+        if len(X) != len(y):
+            raise ValueError("Число строк X и y должно совпадать.")
+        if (y <= 0).any() or not np.isfinite(y).all():
+            raise ValueError("Цены должны быть положительными и конечными.")
+
+        self.support_ = make_support(X)
+        records = [
+            record_features(row, self.support_, with_time=True,
+                            trend_scale=self.trend_scale)
+            for row in X[FEATURE_COLS].to_dict("records")
+        ]
+        self.vectorizer_ = DictVectorizer(sparse=True)
+        matrix = self.vectorizer_.fit_transform(records)
+        self.scaler_ = StandardScaler(with_mean=False)
+        matrix_scaled = self.scaler_.fit_transform(matrix)
+
+        target = np.log(y / X["area"].to_numpy(dtype=float))
+        year_counts = X["period_year"].value_counts()
+        n_rows = len(X)
+        n_years = len(year_counts)
+        sample_weight = X["period_year"].map(
+            lambda year: n_rows / (n_years * year_counts.loc[year])
+        ).to_numpy(dtype=float)
+
+        self.model_ = ElasticNet(
+            alpha=float(self.alpha),
+            l1_ratio=float(self.l1_ratio),
+            fit_intercept=True,
+            max_iter=int(self.max_iter),
+            tol=float(self.tol),
+            selection="cyclic",
+            random_state=int(self.random_state),
+        )
+        self.model_.fit(matrix_scaled, target, sample_weight=sample_weight)
+        self.is_fitted_ = True
+        return self
+
+    def predict(self, X):
+        check_is_fitted(self, "is_fitted_")
+        X = X.copy().reset_index(drop=True)
+        records = [
+            record_features(row, self.support_, with_time=True,
+                            trend_scale=self.trend_scale)
+            for row in X[FEATURE_COLS].to_dict("records")
+        ]
+        matrix = self.vectorizer_.transform(records)
+        matrix_scaled = self.scaler_.transform(matrix)
+        log_price_per_sqm = self.model_.predict(matrix_scaled)
+        prices = np.exp(log_price_per_sqm) * X["area"].to_numpy(dtype=float)
+        if not np.isfinite(prices).all() or (prices <= 0).any():
+            raise ValueError("Получены некорректные прогнозы; проверьте признаки и диапазон данных.")
+        return prices
+
+
+# Совместимость со старыми ноутбуками, сохранявшими класс как __main__.ApartmentElasticNet.
+# Новые bundle используют импортируемый адрес model.ApartmentElasticNet,
+# совпадающий с импортом model as prognosis_model в Django-сервисе.
+setattr(sys.modules["__main__"], "ApartmentElasticNet", ApartmentElasticNet)
+
 MODEL_BUNDLE_PATH = BASE_DIR / "Prognosis_model.joblib"
 
 
@@ -565,14 +710,17 @@ class PrognosisModel:
     """Adapter from the trained model bundle to the forecasting API."""
 
     def __init__(self, bundle: dict, model_df: pd.DataFrame, annual_market: pd.DataFrame):
-        required = {"price_model", "trend_model", "base_year"}
+        required = {"price_model", "base_year"}
         missing = required.difference(bundle)
         if missing:
             raise ValueError(f"В файле модели отсутствуют обязательные поля: {sorted(missing)}")
+        if "trend_model" not in bundle and bundle.get("model_name") != "ElasticNet":
+            raise ValueError("В bundle нет модели прогноза или поля model_name='ElasticNet'.")
         self.bundle = bundle
         self.price_model = bundle["price_model"]
-        self.trend_model = bundle["trend_model"]
-        self.selected_model = bundle.get("selected_model", "CatBoost")
+        self.trend_model = bundle.get("trend_model")
+        self.single_model = self.trend_model is None
+        self.selected_model = bundle.get("model_name", bundle.get("selected_model", "ElasticNet"))
         self.model_df = model_df
         self.annual_market = annual_market
         self.base_year = int(bundle["base_year"])
@@ -591,8 +739,80 @@ class PrognosisModel:
             raise ValueError("Параметры квартиры выходят за границы обучающей выборки модели.")
         return pd.DataFrame([row])[FEATURE_COLS]
 
+    def _inflation_rates_for_years(self, years: list[int]) -> list[float]:
+        """Строит непрерывный годовой ряд инфляции для лет прогноза."""
+        if not years:
+            return []
+
+        market_rates = {}
+        if not self.annual_market.empty:
+            market_rates = {
+                int(row.period_year): float(row.inflation_pct)
+                for row in self.annual_market.itertuples()
+                if pd.notna(row.inflation_pct)
+            }
+        if not self.annual_market.empty:
+            first_market_year = int(self.annual_market["period_year"].min())
+            forecast_source = self.annual_market
+        else:
+            first_market_year = min(OFFICIAL_INFLATION_RATES)
+            forecast_source = pd.DataFrame({
+                "period_year": list(OFFICIAL_INFLATION_RATES),
+                "inflation_pct": list(OFFICIAL_INFLATION_RATES.values()),
+                "deals": [MIN_DEALS_FOR_INFLATION] * len(OFFICIAL_INFLATION_RATES),
+            })
+        forecast_years, forecast_rates = forecast_inflation_pct(
+            forecast_source,
+            max(0, max(years) - first_market_year),
+            floor_pct=INFLATION_FORECAST_FLOOR_PCT,
+            cap_pct=MAX_INFLATION_PCT,
+        )
+        projected_rates = dict(zip(forecast_years, forecast_rates))
+
+        result = []
+        for year in years:
+            if year in market_rates and year > min(market_rates):
+                rate = market_rates[year]
+            elif year in projected_rates:
+                rate = projected_rates[year]
+            else:
+                rate = OFFICIAL_INFLATION_RATES.get(year, MIN_INFLATION_PCT)
+            result.append(float(np.clip(
+                rate, INFLATION_FORECAST_FLOOR_PCT, MAX_INFLATION_PCT
+            )))
+        return result
+
     def forecast(self, apartment: dict, n_years: int) -> dict:
         years = list(range(self.base_year, self.base_year + int(n_years) + 1))
+        if self.single_model:
+            prices = [
+                float(self.price_model.predict(self._apartment_row(apartment, year))[0])
+                for year in years
+            ]
+            if not np.isfinite(prices).all() or any(price <= 0 for price in prices):
+                raise ValueError("Модель вернула некорректную последовательность цен.")
+            annual_inflation = self._inflation_rates_for_years(years)
+            forecast_df = pd.DataFrame({
+                "Год": years,
+                "Прогноз цены, млн руб.": [round(price / 1_000_000, 2) for price in prices],
+                "Инфляция, %": [round(value, 1) for value in annual_inflation],
+            })
+            return {
+                "forecast": forecast_df,
+                "forecast_exact": [
+                    {"year": year, "price_mln": price / 1_000_000,
+                     "inflation_pct": inflation}
+                    for year, price, inflation in zip(years, prices, annual_inflation)
+                ],
+                "base_price": prices[0],
+                "coef_region": float(self.region_price_coef.get(normalize_text(apartment["region"]), 1.0)),
+                "growth_source": "ElasticNet",
+                "base_year": self.base_year,
+                "avg_inflation_level": self.avg_inflation_level,
+                "infl_first": annual_inflation[1] if len(annual_inflation) > 1 else None,
+                "infl_last": annual_inflation[-1] if len(annual_inflation) > 1 else None,
+            }
+
         model_prices = [
             float(self.trend_model.predict(self._apartment_row(apartment, year))[0])
             for year in years[:2]
@@ -643,7 +863,7 @@ class PrognosisModel:
 
 
 def train_model() -> PrognosisModel:
-    """Load the trained CatBoost and dynamic Ridge models from the saved bundle."""
+    """Load the trained model bundle and prepare the data used by the application."""
     if not MODEL_BUNDLE_PATH.exists():
         raise FileNotFoundError(f"Файл обученной модели не найден: {MODEL_BUNDLE_PATH}")
     df_raw = read_csv_robust(DATA_PATH)

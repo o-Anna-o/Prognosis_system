@@ -22,18 +22,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="9a96e0c8-0e9b-4d50-98bb-5ba4d566b103" name="Changes" comment="заново проведено сравнение моделей">
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.ipynb_checkpoints/Comparison_base_model-checkpoint.ipynb" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.ipynb_checkpoints/Comparison_prognosis_model-checkpoint.ipynb" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.ipynb_checkpoints/Dynamic_Ridge_prognosis_model-checkpoint.ipynb" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Comparison_base_model.ipynb" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Comparison_prognosis_model.ipynb" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Dynamic_Ridge_prognosis_model.ipynb" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Сравнение базовых моделей.xlsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/выбор модели для базовой оценки/Prognosis_model.ipynb" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/выбор модели для базовой оценки/Prognosis_model.joblib" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/сравнение прогнозной модели.xlsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Prognosis_model.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/Prognosis_model.ipynb" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Prognosis_model.joblib" beforeDir="false" afterPath="$PROJECT_DIR$/Prognosis_model.joblib" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/app/browserUi.ts" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/app/browserUi.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/web_app/model.py" beforeDir="false" afterPath="$PROJECT_DIR$/web_app/model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Сравнение базовых моделей.xlsx" beforeDir="false" afterPath="$PROJECT_DIR$/Сравнение базовых моделей.xlsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/сравнение прогнозной модели.xlsx" beforeDir="false" afterPath="$PROJECT_DIR$/сравнение прогнозной модели.xlsx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -43,7 +39,7 @@
   <component name="Git.Settings">
     <option name="RECENT_BRANCH_BY_REPOSITORY">
       <map>
-        <entry key="$PROJECT_DIR$" value="5-catboost-model" />
+        <entry key="$PROJECT_DIR$" value="6-select-model" />
       </map>
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -65,23 +61,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0" />
-      <entry key="MS500" value="1.0" />
-      <entry key="S2" value="1.0" />
-      <entry key="S5" value="1.0" />
-      <entry key="S10" value="1.0" />
-      <entry key="S30" value="1.0000017044622735" />
-      <entry key="S60" value="1.0041246607870804" />
-      <entry key="M2" value="1.2030452176771615" />
-      <entry key="M5" value="3.1038403962176715" />
-      <entry key="M10" value="5.586721205715261" />
-      <entry key="M15" value="6.947493762227217" />
-      <entry key="M30" value="8.711991791563742" />
-      <entry key="H1" value="9.789608724443044" />
-      <entry key="H2" value="12.44304546149537" />
-      <entry key="H4" value="47.65997443871733" />
-      <entry key="D1" value="437.64749329245126" />
-      <entry key="W1" value="662.3478758606269" />
+      <entry key="MS100" value="1.0289460134496893" />
+      <entry key="MS500" value="1.7727487832652051" />
+      <entry key="S2" value="3.8219711047993514" />
+      <entry key="S5" value="6.177530915481901" />
+      <entry key="S10" value="8.154052580250847" />
+      <entry key="S30" value="11.776059246418022" />
+      <entry key="S60" value="16.86791323881524" />
+      <entry key="M2" value="23.258441476561554" />
+      <entry key="M5" value="29.99182552501041" />
+      <entry key="M10" value="35.004868205019996" />
+      <entry key="M15" value="39.264153907171185" />
+      <entry key="M30" value="50.223584182059724" />
+      <entry key="H1" value="79.49083068928508" />
+      <entry key="H2" value="144.28454239041673" />
+      <entry key="H4" value="236.57684322377122" />
+      <entry key="D1" value="704.8446644630154" />
+      <entry key="W1" value="1011.8922127668931" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -91,35 +87,35 @@
       <entry key="S10" value="0.0" />
       <entry key="S30" value="0.0" />
       <entry key="S60" value="0.0" />
-      <entry key="M2" value="7.379845495105393E-169" />
-      <entry key="M5" value="6.7691369304763E-68" />
-      <entry key="M10" value="3.4633316359964773E-34" />
-      <entry key="M15" value="6.121532847529876E-23" />
-      <entry key="M30" value="1.0980075269325103E-11" />
-      <entry key="H1" value="4.677042610056296E-6" />
-      <entry key="H2" value="0.0030569501355929857" />
-      <entry key="H4" value="0.07818186985016476" />
-      <entry key="D1" value="1.1651145490493169" />
-      <entry key="W1" value="1.851427721005198" />
+      <entry key="M2" value="3.710214246438947E-224" />
+      <entry key="M5" value="5.141312322784279E-90" />
+      <entry key="M10" value="3.018314039597194E-45" />
+      <entry key="M15" value="2.592430248168179E-30" />
+      <entry key="M30" value="2.2595854273424666E-15" />
+      <entry key="H1" value="6.709390208073575E-8" />
+      <entry key="H2" value="3.661375040504181E-4" />
+      <entry key="H4" value="0.027057270540338997" />
+      <entry key="D1" value="0.9762587676822592" />
+      <entry key="W1" value="1.8052394183944764" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="9.511286372808835E-5" />
-      <entry key="MS500" value="0.1569089989103304" />
-      <entry key="S2" value="0.6293785867524289" />
-      <entry key="S5" value="0.8309306621596727" />
-      <entry key="S10" value="0.9115539820327003" />
-      <entry key="S30" value="0.9696051040881839" />
-      <entry key="S60" value="0.988805644961019" />
-      <entry key="M2" value="1.1952746879429443" />
-      <entry key="M5" value="3.1004168464265045" />
-      <entry key="M10" value="5.5848079321023185" />
-      <entry key="M15" value="6.94614493886439" />
-      <entry key="M30" value="8.711269941878424" />
-      <entry key="H1" value="9.789238072989455" />
-      <entry key="H2" value="12.445904835137481" />
-      <entry key="H4" value="47.73800038185393" />
-      <entry key="D1" value="438.81246547451923" />
-      <entry key="W1" value="664.1992732360496" />
+      <entry key="MS100" value="0.9734434953415385" />
+      <entry key="MS500" value="1.7535836549855377" />
+      <entry key="S2" value="3.81202459438987" />
+      <entry key="S5" value="6.171111798079362" />
+      <entry key="S10" value="8.149811062653274" />
+      <entry key="S30" value="11.774024645424209" />
+      <entry key="S60" value="16.866464175179832" />
+      <entry key="M2" value="23.257445919185795" />
+      <entry key="M5" value="29.99131245389527" />
+      <entry key="M10" value="35.004565570338876" />
+      <entry key="M15" value="39.26392439495391" />
+      <entry key="M30" value="50.22342723708491" />
+      <entry key="H1" value="79.49064851440237" />
+      <entry key="H2" value="144.28465799926406" />
+      <entry key="H4" value="236.60364180332758" />
+      <entry key="D1" value="705.8207458545983" />
+      <entry key="W1" value="1013.6974134810181" />
     </decayedShown>
   </component>
   <component name="ProjectColorInfo">{
@@ -136,7 +132,7 @@
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "git-widget-placeholder": "6-select-model",
+    "git-widget-placeholder": "7-elasticnet-model",
     "ignore.virus.scanning.warn.message": "true",
     "last_opened_file_path": "C:/Users/AnnaA/Desktop/Prognosis_system",
     "node.js.detected.package.eslint": "true",
@@ -214,7 +210,15 @@
       <option name="project" value="LOCAL" />
       <updated>1795608485459</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="заново проведено сравнение моделей">
+      <option name="closed" value="true" />
+      <created>1795608624931</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1795608624931</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
